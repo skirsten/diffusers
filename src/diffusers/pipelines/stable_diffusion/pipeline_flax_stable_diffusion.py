@@ -200,7 +200,7 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
         )
 
         # scale the initial noise by the standard deviation required by the scheduler
-        latents = latents * self.scheduler.init_noise_sigma
+        latents = latents * params["scheduler"].init_noise_sigma
 
         if debug:
             # run with python for loop

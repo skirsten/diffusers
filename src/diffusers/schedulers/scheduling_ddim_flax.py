@@ -57,6 +57,9 @@ def betas_for_alpha_bar(num_diffusion_timesteps, max_beta=0.999) -> jnp.ndarray:
 
 @flax.struct.dataclass
 class DDIMSchedulerState:
+    # standard deviation of the initial noise distribution
+    init_noise_sigma = 1.0
+
     # setable values
     timesteps: jnp.ndarray
     alphas_cumprod: jnp.ndarray
@@ -140,9 +143,6 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
         # `set_alpha_to_one` decides whether we set this parameter simply to one or
         # whether we use the final alpha of the "non-previous" one.
         self.final_alpha_cumprod = jnp.array(1.0) if set_alpha_to_one else float(self._alphas_cumprod[0])
-
-        # standard deviation of the initial noise distribution
-        self.init_noise_sigma = 1.0
 
     def scale_model_input(
         self, state: DDIMSchedulerState, sample: jnp.ndarray, timestep: Optional[int] = None

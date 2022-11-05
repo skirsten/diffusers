@@ -25,6 +25,9 @@ from .scheduling_utils_flax import FlaxSchedulerMixin, FlaxSchedulerOutput, broa
 
 @flax.struct.dataclass
 class LMSDiscreteSchedulerState:
+    # standard deviation of the initial noise distribution
+    init_noise_sigma: jnp.float32
+
     # setable values
     num_inference_steps: Optional[int] = None
     timesteps: Optional[jnp.ndarray] = None
@@ -33,7 +36,7 @@ class LMSDiscreteSchedulerState:
 
     @classmethod
     def create(cls, num_train_timesteps: int, sigmas: jnp.ndarray):
-        return cls(timesteps=jnp.arange(0, num_train_timesteps)[::-1], sigmas=sigmas)
+        return cls(timesteps=jnp.arange(0, num_train_timesteps)[::-1], sigmas=sigmas, init_noise_sigma=jnp.max(sigmas))
 
 
 @dataclass
@@ -90,7 +93,7 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
         self.alphas_cumprod = jnp.cumprod(self.alphas, axis=0)
 
     def create_state(self):
-        self.state = LMSDiscreteSchedulerState.create(
+        return LMSDiscreteSchedulerState.create(
             num_train_timesteps=self.config.num_train_timesteps,
             sigmas=((1 - self.alphas_cumprod) / self.alphas_cumprod) ** 0.5,
         )

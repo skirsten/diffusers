@@ -57,6 +57,9 @@ def betas_for_alpha_bar(num_diffusion_timesteps: int, max_beta=0.999) -> jnp.nda
 
 @flax.struct.dataclass
 class PNDMSchedulerState:
+    # standard deviation of the initial noise distribution
+    init_noise_sigma = 1.0
+
     # setable values
     _timesteps: jnp.ndarray
     num_inference_steps: Optional[int] = None
@@ -152,9 +155,6 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         # For more information on the algorithm please take a look at the paper: https://arxiv.org/pdf/2202.09778.pdf
         # mainly at formula (9), (12), (13) and the Algorithm 2.
         self.pndm_order = 4
-
-        # standard deviation of the initial noise distribution
-        self.init_noise_sigma = 1.0
 
     def create_state(self):
         return PNDMSchedulerState.create(num_train_timesteps=self.config.num_train_timesteps)
