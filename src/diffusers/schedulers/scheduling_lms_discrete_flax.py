@@ -148,6 +148,23 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
             sigmas=sigmas,
         )
 
+    def scale_model_input(self, state: LMSDiscreteSchedulerState, sample: jnp.ndarray, timestep: int) -> jnp.ndarray:
+        """
+        Scales the denoising model input by `(sigma**2 + 1) ** 0.5` to match the K-LMS algorithm.
+
+        Args:
+            state (`LMSDiscreteSchedulerState`): the `FlaxLMSDiscreteScheduler` state data class instance.
+            sample (`jnp.ndarray`): input sample
+            timestep (`int`, optional): current timestep
+
+        Returns:
+            `jnp.ndarray`: scaled input sample
+        """
+
+        sigma = state.sigmas[timestep]
+        sample = sample / ((sigma**2 + 1) ** 0.5)
+        return sample
+
     def step(
         self,
         state: LMSDiscreteSchedulerState,
