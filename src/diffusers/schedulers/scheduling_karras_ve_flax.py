@@ -109,6 +109,20 @@ class FlaxKarrasVeScheduler(FlaxSchedulerMixin, ConfigMixin):
     def create_state(self):
         return KarrasVeSchedulerState.create(init_noise_sigma=self.config.sigma_max)
 
+    def scale_model_input(
+        self, state: KarrasVeSchedulerState, sample: jnp.ndarray, timestep: Optional[int] = None
+    ) -> jnp.ndarray:
+        """
+        Args:
+            state (`KarrasVeSchedulerState`): the `FlaxKarrasVeScheduler` state data class instance.
+            sample (`jnp.ndarray`): input sample
+            timestep (`int`, optional): current timestep
+
+        Returns:
+            `jnp.ndarray`: scaled input sample
+        """
+        return sample
+
     def set_timesteps(
         self, state: KarrasVeSchedulerState, num_inference_steps: int, shape: Tuple = ()
     ) -> KarrasVeSchedulerState:
