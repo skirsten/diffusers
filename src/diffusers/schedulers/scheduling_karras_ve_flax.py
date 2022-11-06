@@ -27,14 +27,17 @@ from .scheduling_utils_flax import FlaxSchedulerMixin
 
 @flax.struct.dataclass
 class KarrasVeSchedulerState:
+    # standard deviation of the initial noise distribution
+    init_noise_sigma: jnp.float32
+
     # setable values
     num_inference_steps: Optional[int] = None
     timesteps: Optional[jnp.ndarray] = None
     schedule: Optional[jnp.ndarray] = None  # sigma(t_i)
 
     @classmethod
-    def create(cls):
-        return cls()
+    def create(cls, init_noise_sigma: jnp.float32):
+        return cls(init_noise_sigma=init_noise_sigma)
 
 
 @dataclass
@@ -104,7 +107,7 @@ class FlaxKarrasVeScheduler(FlaxSchedulerMixin, ConfigMixin):
         pass
 
     def create_state(self):
-        return KarrasVeSchedulerState.create()
+        return KarrasVeSchedulerState.create(init_noise_sigma=self.config.sigma_max)
 
     def set_timesteps(
         self, state: KarrasVeSchedulerState, num_inference_steps: int, shape: Tuple = ()

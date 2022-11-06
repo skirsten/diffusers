@@ -27,14 +27,17 @@ from .scheduling_utils_flax import FlaxSchedulerMixin, FlaxSchedulerOutput, broa
 
 @flax.struct.dataclass
 class ScoreSdeVeSchedulerState:
+    # standard deviation of the initial noise distribution
+    init_noise_sigma: jnp.float32
+
     # setable values
     timesteps: Optional[jnp.ndarray] = None
     discrete_sigmas: Optional[jnp.ndarray] = None
     sigmas: Optional[jnp.ndarray] = None
 
     @classmethod
-    def create(cls):
-        return cls()
+    def create(cls, init_noise_sigma: jnp.float32):
+        return cls(init_noise_sigma=init_noise_sigma)
 
 
 @dataclass
@@ -97,7 +100,7 @@ class FlaxScoreSdeVeScheduler(FlaxSchedulerMixin, ConfigMixin):
         pass
 
     def create_state(self):
-        state = ScoreSdeVeSchedulerState.create()
+        state = ScoreSdeVeSchedulerState.create(init_noise_sigma=self.config.sigma_max)
         return self.set_sigmas(
             state,
             self.config.num_train_timesteps,

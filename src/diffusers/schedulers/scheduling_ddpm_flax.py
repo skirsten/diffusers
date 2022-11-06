@@ -57,6 +57,9 @@ def betas_for_alpha_bar(num_diffusion_timesteps, max_beta=0.999) -> jnp.ndarray:
 
 @flax.struct.dataclass
 class DDPMSchedulerState:
+    # standard deviation of the initial noise distribution
+    init_noise_sigma = 1.0
+
     # setable values
     timesteps: jnp.ndarray
     num_inference_steps: Optional[int] = None
