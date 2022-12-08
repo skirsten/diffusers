@@ -14,7 +14,6 @@
 
 # DISCLAIMER: This file is strongly influenced by https://github.com/ermongroup/ddim
 
-import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
@@ -23,61 +22,34 @@ import jax
 import jax.numpy as jnp
 
 from ..configuration_utils import ConfigMixin, register_to_config
+from .scheduling_common_flax import SchedulerCommonState, add_noise_common, create_common_state
 from .scheduling_utils_flax import (
     _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS,
     FlaxSchedulerMixin,
     FlaxSchedulerOutput,
-    broadcast_to_shape_from_left,
 )
-
-
-def betas_for_alpha_bar(num_diffusion_timesteps: int, max_beta=0.999) -> jnp.ndarray:
-    """
-    Create a beta schedule that discretizes the given alpha_t_bar function, which defines the cumulative product of
-    (1-beta) over time from t = [0,1].
-
-    Contains a function alpha_bar that takes an argument t and transforms it to the cumulative product of (1-beta) up
-    to that part of the diffusion process.
-
-
-    Args:
-        num_diffusion_timesteps (`int`): the number of betas to produce.
-        max_beta (`float`): the maximum beta to use; use values lower than 1 to
-                     prevent singularities.
-
-    Returns:
-        betas (`jnp.ndarray`): the betas used by the scheduler to step the model outputs
-    """
-
-    def alpha_bar(time_step):
-        return math.cos((time_step + 0.008) / 1.008 * math.pi / 2) ** 2
-
-    betas = []
-    for i in range(num_diffusion_timesteps):
-        t1 = i / num_diffusion_timesteps
-        t2 = (i + 1) / num_diffusion_timesteps
-        betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
-    return jnp.array(betas, dtype=jnp.float32)
 
 
 @flax.struct.dataclass
 class PNDMSchedulerState:
+    common: SchedulerCommonState
+
     # setable values
-    _timesteps: jnp.ndarray
+    init_noise_sigma: jnp.ndarray
+    timesteps: jnp.ndarray
     num_inference_steps: Optional[int] = None
     prk_timesteps: Optional[jnp.ndarray] = None
     plms_timesteps: Optional[jnp.ndarray] = None
-    timesteps: Optional[jnp.ndarray] = None
 
     # running values
     cur_model_output: Optional[jnp.ndarray] = None
-    counter: int = 0
+    counter: Optional[int] = None
     cur_sample: Optional[jnp.ndarray] = None
-    ets: jnp.ndarray = jnp.array([])
+    ets: Optional[jnp.ndarray] = None
 
     @classmethod
-    def create(cls, num_train_timesteps: int):
-        return cls(_timesteps=jnp.arange(0, num_train_timesteps)[::-1])
+    def create(cls, common: SchedulerCommonState, timesteps: jnp.ndarray):
+        return cls(common=common, timesteps=timesteps)
 
 
 @dataclass
@@ -121,6 +93,8 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     _compatibles = _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS.copy()
 
+    pndm_order: int
+
     @property
     def has_state(self):
         return True
@@ -137,34 +111,25 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         set_alpha_to_one: bool = False,
         steps_offset: int = 0,
     ):
-        if trained_betas is not None:
-            self.betas = jnp.asarray(trained_betas)
-        elif beta_schedule == "linear":
-            self.betas = jnp.linspace(beta_start, beta_end, num_train_timesteps, dtype=jnp.float32)
-        elif beta_schedule == "scaled_linear":
-            # this schedule is very specific to the latent diffusion model.
-            self.betas = jnp.linspace(beta_start**0.5, beta_end**0.5, num_train_timesteps, dtype=jnp.float32) ** 2
-        elif beta_schedule == "squaredcos_cap_v2":
-            # Glide cosine schedule
-            self.betas = betas_for_alpha_bar(num_train_timesteps)
-        else:
-            raise NotImplementedError(f"{beta_schedule} does is not implemented for {self.__class__}")
-
-        self.alphas = 1.0 - self.betas
-        self.alphas_cumprod = jnp.cumprod(self.alphas, axis=0)
-
-        self.final_alpha_cumprod = jnp.array(1.0) if set_alpha_to_one else self.alphas_cumprod[0]
-
         # For now we only support F-PNDM, i.e. the runge-kutta method
         # For more information on the algorithm please take a look at the paper: https://arxiv.org/pdf/2202.09778.pdf
         # mainly at formula (9), (12), (13) and the Algorithm 2.
         self.pndm_order = 4
 
-        # standard deviation of the initial noise distribution
-        self.init_noise_sigma = 1.0
+    def create_state(self, common: Optional[SchedulerCommonState] = None) -> PNDMSchedulerState:
+        if common is None:
+            common = create_common_state(self.config)
 
-    def create_state(self):
-        return PNDMSchedulerState.create(num_train_timesteps=self.config.num_train_timesteps)
+        # standard deviation of the initial noise distribution
+        init_noise_sigma = jnp.array(1.0)
+
+        timesteps = jnp.arange(0, self.config.num_train_timesteps)[::-1]
+
+        return PNDMSchedulerState.create(
+            common=common,
+            init_noise_sigma=init_noise_sigma,
+            timesteps=timesteps,
+        )
 
     def set_timesteps(self, state: PNDMSchedulerState, num_inference_steps: int, shape: Tuple) -> PNDMSchedulerState:
         """
@@ -178,42 +143,46 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             shape (`Tuple`):
                 the shape of the samples to be generated.
         """
-        offset = self.config.steps_offset
 
         step_ratio = self.config.num_train_timesteps // num_inference_steps
         # creates integer timesteps by multiplying by ratio
         # rounding to avoid issues when num_inference_step is power of 3
-        _timesteps = (jnp.arange(0, num_inference_steps) * step_ratio).round() + offset
-
-        state = state.replace(num_inference_steps=num_inference_steps, _timesteps=_timesteps)
+        _timesteps = (jnp.arange(0, num_inference_steps) * step_ratio).round() + self.config.steps_offset
 
         if self.config.skip_prk_steps:
             # for some models like stable diffusion the prk steps can/should be skipped to
             # produce better results. When using PNDM with `self.config.skip_prk_steps` the implementation
             # is based on crowsonkb's PLMS sampler implementation: https://github.com/CompVis/latent-diffusion/pull/51
-            state = state.replace(
-                prk_timesteps=jnp.array([]),
-                plms_timesteps=jnp.concatenate(
-                    [state._timesteps[:-1], state._timesteps[-2:-1], state._timesteps[-1:]]
-                )[::-1],
-            )
+
+            prk_timesteps = jnp.array([])
+            plms_timesteps = jnp.concatenate([_timesteps[:-1], _timesteps[-2:-1], _timesteps[-1:]])[::-1]
+
         else:
-            prk_timesteps = jnp.array(state._timesteps[-self.pndm_order :]).repeat(2) + jnp.tile(
+            prk_timesteps = jnp.array(_timesteps[-self.pndm_order :]).repeat(2) + jnp.tile(
                 jnp.array([0, self.config.num_train_timesteps // num_inference_steps // 2]), self.pndm_order
             )
 
-            state = state.replace(
-                prk_timesteps=(prk_timesteps[:-1].repeat(2)[1:-1])[::-1],
-                plms_timesteps=state._timesteps[:-3][::-1],
-            )
+            prk_timesteps = (prk_timesteps[:-1].repeat(2)[1:-1])[::-1]
+            plms_timesteps = _timesteps[:-3][::-1]
+
+        timesteps = jnp.concatenate([state.prk_timesteps, state.plms_timesteps]).astype(jnp.int32)
+
+        # initial running values
+
+        cur_model_output = jnp.zeros(shape)
+        counter = (0,)
+        cur_sample = jnp.zeros(shape)
+        ets = jnp.zeros((4,) + shape)
 
         return state.replace(
-            timesteps=jnp.concatenate([state.prk_timesteps, state.plms_timesteps]).astype(jnp.int32),
-            counter=0,
-            # Reserve space for the state variables
-            cur_model_output=jnp.zeros(shape),
-            cur_sample=jnp.zeros(shape),
-            ets=jnp.zeros((4,) + shape),
+            timesteps=timesteps,
+            num_inference_steps=num_inference_steps,
+            prk_timesteps=prk_timesteps,
+            plms_timesteps=plms_timesteps,
+            cur_model_output=cur_model_output,
+            counter=counter,
+            cur_sample=cur_sample,
+            ets=ets,
         )
 
     def scale_model_input(
@@ -260,10 +229,14 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             `tuple`. When returning a tuple, the first element is the sample tensor.
 
         """
-        if self.config.skip_prk_steps:
-            prev_sample, state = self.step_plms(
-                state=state, model_output=model_output, timestep=timestep, sample=sample
+
+        if state.num_inference_steps is None:
+            raise ValueError(
+                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
             )
+
+        if self.config.skip_prk_steps:
+            prev_sample, state = self.step_plms(state, model_output, timestep, sample)
         else:
             prev_sample, state = jax.lax.switch(
                 jnp.where(state.counter < len(state.prk_timesteps), 0, 1),
@@ -304,10 +277,6 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             `tuple`. When returning a tuple, the first element is the sample tensor.
 
         """
-        if state.num_inference_steps is None:
-            raise ValueError(
-                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
-            )
 
         diff_to_prev = jnp.where(
             state.counter % 2, 0, self.config.num_train_timesteps // state.num_inference_steps // 2
@@ -345,7 +314,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         )
 
         cur_sample = state.cur_sample
-        prev_sample = self._get_prev_sample(cur_sample, timestep, prev_timestep, model_output)
+        prev_sample = self._get_prev_sample(state, cur_sample, timestep, prev_timestep, model_output)
         state = state.replace(counter=state.counter + 1)
 
         return (prev_sample, state)
@@ -374,10 +343,6 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             `tuple`. When returning a tuple, the first element is the sample tensor.
 
         """
-        if state.num_inference_steps is None:
-            raise ValueError(
-                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
-            )
 
         if not self.config.skip_prk_steps and len(state.ets) < 3:
             raise ValueError(
@@ -469,12 +434,12 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         sample = state.cur_sample
         model_output = state.cur_model_output
-        prev_sample = self._get_prev_sample(sample, timestep, prev_timestep, model_output)
+        prev_sample = self._get_prev_sample(state, sample, timestep, prev_timestep, model_output)
         state = state.replace(counter=state.counter + 1)
 
         return (prev_sample, state)
 
-    def _get_prev_sample(self, sample, timestep, prev_timestep, model_output):
+    def _get_prev_sample(self, state: PNDMSchedulerState, sample, timestep, prev_timestep, model_output):
         # See formula (9) of PNDM paper https://arxiv.org/pdf/2202.09778.pdf
         # this function computes x_(t−δ) using the formula of (9)
         # Note that x_t needs to be added to both sides of the equation
@@ -487,8 +452,10 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         # sample -> x_t
         # model_output -> e_θ(x_t, t)
         # prev_sample -> x_(t−δ)
-        alpha_prod_t = self.alphas_cumprod[timestep]
-        alpha_prod_t_prev = jnp.where(prev_timestep >= 0, self.alphas_cumprod[prev_timestep], self.final_alpha_cumprod)
+        alpha_prod_t = state.common.alphas_cumprod[timestep]
+        alpha_prod_t_prev = jnp.where(
+            prev_timestep >= 0, state.common.alphas_cumprod[prev_timestep], state.common.final_alpha_cumprod
+        )
         beta_prod_t = 1 - alpha_prod_t
         beta_prod_t_prev = 1 - alpha_prod_t_prev
 
@@ -512,20 +479,12 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     def add_noise(
         self,
+        state: PNDMSchedulerState,
         original_samples: jnp.ndarray,
         noise: jnp.ndarray,
         timesteps: jnp.ndarray,
     ) -> jnp.ndarray:
-        sqrt_alpha_prod = self.alphas_cumprod[timesteps] ** 0.5
-        sqrt_alpha_prod = sqrt_alpha_prod.flatten()
-        sqrt_alpha_prod = broadcast_to_shape_from_left(sqrt_alpha_prod, original_samples.shape)
-
-        sqrt_one_minus_alpha_prod = (1 - self.alphas_cumprod[timesteps]) ** 0.5
-        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
-        sqrt_one_minus_alpha_prod = broadcast_to_shape_from_left(sqrt_one_minus_alpha_prod, original_samples.shape)
-
-        noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
-        return noisy_samples
+        return add_noise_common(state.common, original_samples, noise, timesteps)
 
     def __len__(self):
         return self.config.num_train_timesteps

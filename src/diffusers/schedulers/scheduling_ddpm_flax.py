@@ -14,7 +14,6 @@
 
 # DISCLAIMER: This file is strongly influenced by https://github.com/ermongroup/ddim
 
-import math
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
@@ -22,54 +21,28 @@ import flax
 import jax.numpy as jnp
 from jax import random
 
-from ..configuration_utils import ConfigMixin, FrozenDict, register_to_config
+from ..configuration_utils import ConfigMixin, register_to_config
 from ..utils import deprecate
+from .scheduling_common_flax import SchedulerCommonState, add_noise_common, create_common_state
 from .scheduling_utils_flax import (
     _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS,
     FlaxSchedulerMixin,
     FlaxSchedulerOutput,
-    broadcast_to_shape_from_left,
 )
-
-
-def betas_for_alpha_bar(num_diffusion_timesteps, max_beta=0.999) -> jnp.ndarray:
-    """
-    Create a beta schedule that discretizes the given alpha_t_bar function, which defines the cumulative product of
-    (1-beta) over time from t = [0,1].
-
-    Contains a function alpha_bar that takes an argument t and transforms it to the cumulative product of (1-beta) up
-    to that part of the diffusion process.
-
-
-    Args:
-        num_diffusion_timesteps (`int`): the number of betas to produce.
-        max_beta (`float`): the maximum beta to use; use values lower than 1 to
-                     prevent singularities.
-
-    Returns:
-        betas (`jnp.ndarray`): the betas used by the scheduler to step the model outputs
-    """
-
-    def alpha_bar(time_step):
-        return math.cos((time_step + 0.008) / 1.008 * math.pi / 2) ** 2
-
-    betas = []
-    for i in range(num_diffusion_timesteps):
-        t1 = i / num_diffusion_timesteps
-        t2 = (i + 1) / num_diffusion_timesteps
-        betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
-    return jnp.array(betas, dtype=jnp.float32)
 
 
 @flax.struct.dataclass
 class DDPMSchedulerState:
+    common: SchedulerCommonState
+
     # setable values
+    init_noise_sigma: jnp.ndarray
     timesteps: jnp.ndarray
     num_inference_steps: Optional[int] = None
 
     @classmethod
-    def create(cls, num_train_timesteps: int):
-        return cls(timesteps=jnp.arange(0, num_train_timesteps)[::-1])
+    def create(cls, common: SchedulerCommonState, timesteps: jnp.ndarray):
+        return cls(common=common, timesteps=timesteps)
 
 
 @dataclass
@@ -136,25 +109,20 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         if predict_epsilon is not None:
             self.register_to_config(prediction_type="epsilon" if predict_epsilon else "sample")
 
-        if trained_betas is not None:
-            self.betas = jnp.asarray(trained_betas)
-        elif beta_schedule == "linear":
-            self.betas = jnp.linspace(beta_start, beta_end, num_train_timesteps, dtype=jnp.float32)
-        elif beta_schedule == "scaled_linear":
-            # this schedule is very specific to the latent diffusion model.
-            self.betas = jnp.linspace(beta_start**0.5, beta_end**0.5, num_train_timesteps, dtype=jnp.float32) ** 2
-        elif beta_schedule == "squaredcos_cap_v2":
-            # Glide cosine schedule
-            self.betas = betas_for_alpha_bar(num_train_timesteps)
-        else:
-            raise NotImplementedError(f"{beta_schedule} does is not implemented for {self.__class__}")
+    def create_state(self, common: Optional[SchedulerCommonState] = None) -> DDPMSchedulerState:
+        if common is None:
+            common = create_common_state(self.config)
 
-        self.alphas = 1.0 - self.betas
-        self.alphas_cumprod = jnp.cumprod(self.alphas, axis=0)
-        self.one = jnp.array(1.0)
+        # standard deviation of the initial noise distribution
+        init_noise_sigma = jnp.array(1.0)
 
-    def create_state(self):
-        return DDPMSchedulerState.create(num_train_timesteps=self.config.num_train_timesteps)
+        timesteps = jnp.arange(0, self.config.num_train_timesteps)[::-1]
+
+        return DDPMSchedulerState.create(
+            common=common,
+            init_noise_sigma=init_noise_sigma,
+            timesteps=timesteps,
+        )
 
     def set_timesteps(
         self, state: DDPMSchedulerState, num_inference_steps: int, shape: Tuple = ()
@@ -168,20 +136,25 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
             num_inference_steps (`int`):
                 the number of diffusion steps used when generating samples with a pre-trained model.
         """
-        num_inference_steps = min(self.config.num_train_timesteps, num_inference_steps)
-        timesteps = jnp.arange(
-            0, self.config.num_train_timesteps, self.config.num_train_timesteps // num_inference_steps
-        )[::-1]
-        return state.replace(num_inference_steps=num_inference_steps, timesteps=timesteps)
 
-    def _get_variance(self, t, predicted_variance=None, variance_type=None):
-        alpha_prod_t = self.alphas_cumprod[t]
-        alpha_prod_t_prev = self.alphas_cumprod[t - 1] if t > 0 else self.one
+        step_ratio = self.config.num_train_timesteps // num_inference_steps
+        # creates integer timesteps by multiplying by ratio
+        # rounding to avoid issues when num_inference_step is power of 3
+        timesteps = (jnp.arange(0, num_inference_steps) * step_ratio)[::-1]
+
+        return state.replace(
+            num_inference_steps=num_inference_steps,
+            timesteps=timesteps,
+        )
+
+    def _get_variance(self, state: DDPMSchedulerState, t, predicted_variance=None, variance_type=None):
+        alpha_prod_t = state.common.alphas_cumprod[t]
+        alpha_prod_t_prev = state.common.alphas_cumprod[t - 1] if t > 0 else jnp.array(1.0)
 
         # For t > 0, compute predicted variance βt (see formula (6) and (7) from https://arxiv.org/pdf/2006.11239.pdf)
         # and sample from it to get previous sample
         # x_{t-1} ~ N(pred_prev_sample, variance) == add variance to pred_sample
-        variance = (1 - alpha_prod_t_prev) / (1 - alpha_prod_t) * self.betas[t]
+        variance = (1 - alpha_prod_t_prev) / (1 - alpha_prod_t) * state.common.betas[t]
 
         if variance_type is None:
             variance_type = self.config.variance_type
@@ -193,15 +166,15 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         elif variance_type == "fixed_small_log":
             variance = jnp.log(jnp.clip(variance, a_min=1e-20))
         elif variance_type == "fixed_large":
-            variance = self.betas[t]
+            variance = state.common.betas[t]
         elif variance_type == "fixed_large_log":
             # Glide max_log
-            variance = jnp.log(self.betas[t])
+            variance = jnp.log(state.common.betas[t])
         elif variance_type == "learned":
             return predicted_variance
         elif variance_type == "learned_range":
             min_log = variance
-            max_log = self.betas[t]
+            max_log = state.common.betas[t]
             frac = (predicted_variance + 1) / 2
             variance = frac * max_log + (1 - frac) * min_log
 
@@ -235,15 +208,10 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
             `tuple`. When returning a tuple, the first element is the sample tensor.
 
         """
-        message = (
-            "Please make sure to instantiate your scheduler with `prediction_type` instead. E.g. `scheduler ="
-            " FlaxDDPMScheduler.from_pretrained(<model_id>, prediction_type='epsilon')`."
-        )
-        predict_epsilon = deprecate("predict_epsilon", "0.11.0", message, take_from=kwargs)
-        if predict_epsilon is not None:
-            new_config = dict(self.config)
-            new_config["prediction_type"] = "epsilon" if predict_epsilon else "sample"
-            self._internal_dict = FrozenDict(new_config)
+        if state.num_inference_steps is None:
+            raise ValueError(
+                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
+            )
 
         t = timestep
 
@@ -253,8 +221,8 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
             predicted_variance = None
 
         # 1. compute alphas, betas
-        alpha_prod_t = self.alphas_cumprod[t]
-        alpha_prod_t_prev = self.alphas_cumprod[t - 1] if t > 0 else self.one
+        alpha_prod_t = state.common.alphas_cumprod[t]
+        alpha_prod_t_prev = state.common.alphas_cumprod[t - 1] if t > 0 else jnp.array(1.0)
         beta_prod_t = 1 - alpha_prod_t
         beta_prod_t_prev = 1 - alpha_prod_t_prev
 
@@ -276,8 +244,8 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # 4. Compute coefficients for pred_original_sample x_0 and current sample x_t
         # See formula (7) from https://arxiv.org/pdf/2006.11239.pdf
-        pred_original_sample_coeff = (alpha_prod_t_prev ** (0.5) * self.betas[t]) / beta_prod_t
-        current_sample_coeff = self.alphas[t] ** (0.5) * beta_prod_t_prev / beta_prod_t
+        pred_original_sample_coeff = (alpha_prod_t_prev ** (0.5) * state.common.betas[t]) / beta_prod_t
+        current_sample_coeff = state.common.alphas[t] ** (0.5) * beta_prod_t_prev / beta_prod_t
 
         # 5. Compute predicted previous sample µ_t
         # See formula (7) from https://arxiv.org/pdf/2006.11239.pdf
@@ -288,7 +256,7 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         if t > 0:
             key = random.split(key, num=1)
             noise = random.normal(key=key, shape=model_output.shape)
-            variance = (self._get_variance(t, predicted_variance=predicted_variance) ** 0.5) * noise
+            variance = (self._get_variance(state, t, predicted_variance=predicted_variance) ** 0.5) * noise
 
         pred_prev_sample = pred_prev_sample + variance
 
@@ -299,20 +267,12 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     def add_noise(
         self,
+        state: DDPMSchedulerState,
         original_samples: jnp.ndarray,
         noise: jnp.ndarray,
         timesteps: jnp.ndarray,
     ) -> jnp.ndarray:
-        sqrt_alpha_prod = self.alphas_cumprod[timesteps] ** 0.5
-        sqrt_alpha_prod = sqrt_alpha_prod.flatten()
-        sqrt_alpha_prod = broadcast_to_shape_from_left(sqrt_alpha_prod, original_samples.shape)
-
-        sqrt_one_minus_alpha_prod = (1 - self.alphas_cumprod[timesteps]) ** 0.5
-        sqrt_one_minus_alpha_prod = sqrt_one_minus_alpha_prod.flatten()
-        sqrt_one_minus_alpha_prod = broadcast_to_shape_from_left(sqrt_one_minus_alpha_prod, original_samples.shape)
-
-        noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
-        return noisy_samples
+        return add_noise_common(state.common, original_samples, noise, timesteps)
 
     def __len__(self):
         return self.config.num_train_timesteps
