@@ -48,8 +48,8 @@ class PNDMSchedulerState:
     ets: Optional[jnp.ndarray] = None
 
     @classmethod
-    def create(cls, common: SchedulerCommonState, timesteps: jnp.ndarray):
-        return cls(common=common, timesteps=timesteps)
+    def create(cls, common: SchedulerCommonState, init_noise_sigma: jnp.ndarray, timesteps: jnp.ndarray):
+        return cls(common=common, init_noise_sigma=init_noise_sigma, timesteps=timesteps)
 
 
 @dataclass

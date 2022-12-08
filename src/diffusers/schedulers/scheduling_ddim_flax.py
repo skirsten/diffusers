@@ -40,8 +40,8 @@ class DDIMSchedulerState:
     num_inference_steps: Optional[int] = None
 
     @classmethod
-    def create(cls, common: SchedulerCommonState, timesteps: jnp.ndarray):
-        return cls(common=common, timesteps=timesteps)
+    def create(cls, common: SchedulerCommonState, init_noise_sigma: jnp.ndarray, timesteps: jnp.ndarray):
+        return cls(common=common, init_noise_sigma=init_noise_sigma, timesteps=timesteps)
 
 
 @dataclass
