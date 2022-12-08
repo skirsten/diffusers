@@ -256,12 +256,13 @@ class FlaxStableDiffusionPipeline(FlaxDiffusionPipeline):
             latents, scheduler_state = self.scheduler.step(scheduler_state, noise_pred, t, latents).to_tuple()
             return latents, scheduler_state
 
+        # scale the initial noise by the standard deviation required by the scheduler
+        latents = latents * params["scheduler"].init_noise_sigma
+
         scheduler_state = self.scheduler.set_timesteps(
             params["scheduler"], num_inference_steps=num_inference_steps, shape=latents.shape
         )
 
-        # scale the initial noise by the standard deviation required by the scheduler
-        latents = latents * self.scheduler.init_noise_sigma
         if DEBUG:
             # run with python for loop
             for i in range(num_inference_steps):
