@@ -22,7 +22,6 @@ import flax
 import jax.numpy as jnp
 
 from ..configuration_utils import ConfigMixin, register_to_config
-from ..utils import deprecate
 from .scheduling_common_flax import SchedulerCommonState, add_noise_common, create_common_state
 from .scheduling_utils_flax import (
     _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS,
@@ -41,8 +40,8 @@ class DDIMSchedulerState:
     num_inference_steps: Optional[int] = None
 
     @classmethod
-    def create(cls, common: SchedulerCommonState, timesteps: jnp.ndarray):
-        return cls(common=common, timesteps=timesteps)
+    def create(cls, common: SchedulerCommonState, init_noise_sigma: jnp.ndarray, timesteps: jnp.ndarray):
+        return cls(common=common, init_noise_sigma=init_noise_sigma, timesteps=timesteps)
 
 
 @dataclass
