@@ -233,11 +233,14 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
         )
 
         # 3. Compute linear multistep coefficients
-        order = min(timestep + 1, order)
+        # TODO: Rewrite this because we cannot loop, right?
+        # Also the sum will also not work...
+
+        order = jnp.minimum(timestep + 1, order)
         lms_coeffs = [self.get_lms_coefficient(state, order, timestep, curr_order) for curr_order in range(order)]
 
         # 4. Compute previous sample based on the derivatives path
-        prev_sample = sample + sum(
+        prev_sample = sample + jnp.sum(
             coeff * derivative for coeff, derivative in zip(lms_coeffs, reversed(state.derivatives))
         )
 
