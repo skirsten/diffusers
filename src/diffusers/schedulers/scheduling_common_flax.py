@@ -19,7 +19,7 @@ import jax.numpy as jnp
 from .scheduling_utils_flax import broadcast_to_shape_from_left
 
 
-def betas_for_alpha_bar(num_diffusion_timesteps: int, max_beta=0.999) -> jnp.ndarray:
+def betas_for_alpha_bar(num_diffusion_timesteps: int, max_beta=0.999, dtype=jnp.float32) -> jnp.ndarray:
     """
     Create a beta schedule that discretizes the given alpha_t_bar function, which defines the cumulative product of
     (1-beta) over time from t = [0,1].
@@ -45,7 +45,7 @@ def betas_for_alpha_bar(num_diffusion_timesteps: int, max_beta=0.999) -> jnp.nda
         t1 = i / num_diffusion_timesteps
         t2 = (i + 1) / num_diffusion_timesteps
         betas.append(min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
-    return jnp.array(betas, dtype=jnp.float32)
+    return jnp.array(betas, dtype=dtype)
 
 
 @flax.struct.dataclass
@@ -58,20 +58,20 @@ class SchedulerCommonState:
 
 def create_common_state(config):
     if config.trained_betas is not None:
-        betas = jnp.asarray(config.trained_betas)
+        betas = jnp.asarray(config.trained_betas, dtype=config.dtype)
     elif config.beta_schedule == "linear":
-        betas = jnp.linspace(config.beta_start, config.beta_end, config.num_train_timesteps, dtype=jnp.float32)
+        betas = jnp.linspace(config.beta_start, config.beta_end, config.num_train_timesteps, dtype=config.dtype)
     elif config.beta_schedule == "scaled_linear":
         # this schedule is very specific to the latent diffusion model.
         betas = (
             jnp.linspace(
-                config.beta_start**0.5, config.beta_end**0.5, config.num_train_timesteps, dtype=jnp.float32
+                config.beta_start**0.5, config.beta_end**0.5, config.num_train_timesteps, dtype=config.dtype
             )
             ** 2
         )
     elif config.beta_schedule == "squaredcos_cap_v2":
         # Glide cosine schedule
-        betas = betas_for_alpha_bar(config.num_train_timesteps)
+        betas = betas_for_alpha_bar(config.num_train_timesteps, dtype=config.dtype)
     else:
         # TODO: Does config._class_name exist?
         raise NotImplementedError(f"{config.beta_schedule} does is not implemented for {config._class_name}")
@@ -84,7 +84,7 @@ def create_common_state(config):
     # For the final step, there is no previous alphas_cumprod because we are already at 0
     # `set_alpha_to_one` decides whether we set this parameter simply to one or
     # whether we use the final alpha of the "non-previous" one.
-    final_alpha_cumprod = jnp.array(1.0) if config.set_alpha_to_one else alphas_cumprod[0]
+    final_alpha_cumprod = jnp.array(1.0, dtype=config.dtype) if config.set_alpha_to_one else alphas_cumprod[0]
 
     return SchedulerCommonState(
         alphas=alphas,

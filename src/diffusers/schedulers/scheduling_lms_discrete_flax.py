@@ -90,6 +90,7 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
         beta_end: float = 0.02,
         beta_schedule: str = "linear",
         trained_betas: Optional[jnp.ndarray] = None,
+        dtype: jnp.dtype = jnp.float32,
     ):
         pass
 
@@ -97,7 +98,7 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
         if common is None:
             common = create_common_state(self.config)
 
-        timesteps = jnp.arange(0, self.config.num_train_timesteps)[::-1]
+        timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
         sigmas = ((1 - common.alphas_cumprod) / common.alphas_cumprod) ** 0.5
 
         # standard deviation of the initial noise distribution
@@ -165,21 +166,21 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
                 the number of diffusion steps used when generating samples with a pre-trained model.
         """
 
-        timesteps = jnp.linspace(self.config.num_train_timesteps - 1, 0, num_inference_steps, dtype=jnp.float32)
+        timesteps = jnp.linspace(self.config.num_train_timesteps - 1, 0, num_inference_steps, dtype=self.config.dtype)
 
-        low_idx = jnp.floor(timesteps).astype(int)
-        high_idx = jnp.ceil(timesteps).astype(int)
+        low_idx = jnp.floor(timesteps).astype(jnp.int32)
+        high_idx = jnp.ceil(timesteps).astype(jnp.int32)
 
         frac = jnp.mod(timesteps, 1.0)
 
         sigmas = ((1 - state.common.alphas_cumprod) / state.common.alphas_cumprod) ** 0.5
         sigmas = (1 - frac) * sigmas[low_idx] + frac * sigmas[high_idx]
-        sigmas = jnp.concatenate([sigmas, jnp.array([0.0])])
+        sigmas = jnp.concatenate([sigmas, jnp.array([0.0], dtype=self.config.dtype)])
 
-        timesteps = timesteps.astype(int)
+        timesteps = timesteps.astype(jnp.int32)
 
         # initial running values
-        derivatives = jnp.zeros((0,) + shape)
+        derivatives = jnp.zeros((0,) + shape, dtype=self.config.dtype)
 
         return state.replace(
             timesteps=timesteps,

@@ -110,6 +110,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         skip_prk_steps: bool = False,
         set_alpha_to_one: bool = False,
         steps_offset: int = 0,
+        dtype: jnp.dtype = jnp.float32,
     ):
         # For now we only support F-PNDM, i.e. the runge-kutta method
         # For more information on the algorithm please take a look at the paper: https://arxiv.org/pdf/2202.09778.pdf
@@ -121,9 +122,9 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             common = create_common_state(self.config)
 
         # standard deviation of the initial noise distribution
-        init_noise_sigma = jnp.array(1.0)
+        init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
 
-        timesteps = jnp.arange(0, self.config.num_train_timesteps)[::-1]
+        timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
 
         return PNDMSchedulerState.create(
             common=common,
@@ -154,12 +155,13 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             # produce better results. When using PNDM with `self.config.skip_prk_steps` the implementation
             # is based on crowsonkb's PLMS sampler implementation: https://github.com/CompVis/latent-diffusion/pull/51
 
-            prk_timesteps = jnp.array([])
+            prk_timesteps = jnp.array([], dtype=self.config.dtype)
             plms_timesteps = jnp.concatenate([_timesteps[:-1], _timesteps[-2:-1], _timesteps[-1:]])[::-1]
 
         else:
             prk_timesteps = jnp.array(_timesteps[-self.pndm_order :]).repeat(2) + jnp.tile(
-                jnp.array([0, self.config.num_train_timesteps // num_inference_steps // 2]), self.pndm_order
+                jnp.array([0, self.config.num_train_timesteps // num_inference_steps // 2], dtype=self.config.dtype),
+                self.pndm_order,
             )
 
             prk_timesteps = (prk_timesteps[:-1].repeat(2)[1:-1])[::-1]
@@ -169,10 +171,10 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # initial running values
 
-        cur_model_output = jnp.zeros(shape)
+        cur_model_output = jnp.zeros(shape, dtype=self.config.dtype)
         counter = jnp.int32(0)
-        cur_sample = jnp.zeros(shape)
-        ets = jnp.zeros((4,) + shape)
+        cur_sample = jnp.zeros(shape, dtype=self.config.dtype)
+        ets = jnp.zeros((4,) + shape, dtype=self.config.dtype)
 
         return state.replace(
             timesteps=timesteps,
@@ -387,7 +389,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             return state.replace(
                 ets=ets,
                 cur_sample=sample,
-                cur_model_output=jnp.array(model_output, dtype=jnp.float32),
+                cur_model_output=model_output,
             )
 
         def counter_1(state: PNDMSchedulerState):

@@ -102,6 +102,7 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
         set_alpha_to_one: bool = True,
         steps_offset: int = 0,
         prediction_type: str = "epsilon",
+        dtype: jnp.dtype = jnp.float32,
         **kwargs,
     ):
         pass
@@ -111,9 +112,9 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
             common = create_common_state(self.config)
 
         # standard deviation of the initial noise distribution
-        init_noise_sigma = jnp.array(1.0)
+        init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
 
-        timesteps = jnp.arange(0, self.config.num_train_timesteps)[::-1]
+        timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
 
         return DDIMSchedulerState.create(
             common=common,
@@ -134,16 +135,6 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
             `jnp.ndarray`: scaled input sample
         """
         return sample
-
-    def _get_variance(self, timestep, prev_timestep, alphas_cumprod, final_alpha_cumprod):
-        alpha_prod_t = alphas_cumprod[timestep]
-        alpha_prod_t_prev = jnp.where(prev_timestep >= 0, alphas_cumprod[prev_timestep], final_alpha_cumprod)
-        beta_prod_t = 1 - alpha_prod_t
-        beta_prod_t_prev = 1 - alpha_prod_t_prev
-
-        variance = (beta_prod_t_prev / beta_prod_t) * (1 - alpha_prod_t / alpha_prod_t_prev)
-
-        return variance
 
     def set_timesteps(
         self, state: DDIMSchedulerState, num_inference_steps: int, shape: Tuple = ()
@@ -166,6 +157,16 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
             num_inference_steps=num_inference_steps,
             timesteps=timesteps,
         )
+
+    def _get_variance(self, timestep, prev_timestep, alphas_cumprod, final_alpha_cumprod):
+        alpha_prod_t = alphas_cumprod[timestep]
+        alpha_prod_t_prev = jnp.where(prev_timestep >= 0, alphas_cumprod[prev_timestep], final_alpha_cumprod)
+        beta_prod_t = 1 - alpha_prod_t
+        beta_prod_t_prev = 1 - alpha_prod_t_prev
+
+        variance = (beta_prod_t_prev / beta_prod_t) * (1 - alpha_prod_t / alpha_prod_t_prev)
+
+        return variance
 
     def step(
         self,

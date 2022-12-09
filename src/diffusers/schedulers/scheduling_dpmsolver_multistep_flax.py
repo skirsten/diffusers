@@ -160,6 +160,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         algorithm_type: str = "dpmsolver++",
         solver_type: str = "midpoint",
         lower_order_final: bool = True,
+        dtype: jnp.dtype = jnp.float32,
         **kwargs,
     ):
         pass
@@ -180,9 +181,9 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
             raise NotImplementedError(f"{self.config.solver_type} does is not implemented for {self.__class__}")
 
         # standard deviation of the initial noise distribution
-        init_noise_sigma = jnp.array(1.0)
+        init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
 
-        timesteps = jnp.arange(0, self.config.num_train_timesteps)[::-1]
+        timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
 
         return DPMSolverMultistepSchedulerState.create(
             common=common,
@@ -216,11 +217,11 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # initial running values
 
-        model_outputs = jnp.zeros((self.config.solver_order,) + shape)
+        model_outputs = jnp.zeros((self.config.solver_order,) + shape, dtype=self.config.dtype)
         lower_order_nums = jnp.int32(0)
         step_index = jnp.int32(0)
         prev_timestep = jnp.int32(-1)
-        cur_sample = jnp.zeros(shape)
+        cur_sample = jnp.zeros(shape, dtype=self.config.dtype)
 
         return state.replace(
             num_inference_steps=num_inference_steps,
