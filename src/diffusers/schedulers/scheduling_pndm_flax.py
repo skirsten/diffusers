@@ -246,7 +246,11 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
                 values = [branch(*operands) for branch in branches]
 
-                return values[index]
+                value = values[0]
+                for i in range(1, len(values)):
+                    value = jax.lax.select(index == i, values[i], value)
+
+                return value
 
         if self.config.skip_prk_steps:
             prev_sample, state = self.step_plms(state, model_output, timestep, sample, switch)
