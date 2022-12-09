@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
 import flax
+import jax
 import jax.numpy as jnp
-from jax import random
 
 from ..configuration_utils import ConfigMixin, register_to_config
 from .scheduling_common_flax import SchedulerCommonState, add_noise_common, create_common_state
@@ -192,7 +192,7 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         model_output: jnp.ndarray,
         timestep: int,
         sample: jnp.ndarray,
-        key: random.KeyArray,
+        key: jax.random.KeyArray = jax.random.PRNGKey(0),
         return_dict: bool = True,
         **kwargs,
     ) -> Union[FlaxDDPMSchedulerOutput, Tuple]:
@@ -206,7 +206,7 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
             timestep (`int`): current discrete timestep in the diffusion chain.
             sample (`jnp.ndarray`):
                 current instance of sample being created by diffusion process.
-            key (`random.KeyArray`): a PRNG key.
+            key (`jax.random.KeyArray`): a PRNG key.
             return_dict (`bool`): option for returning tuple rather than FlaxDDPMSchedulerOutput class
 
         Returns:
@@ -228,7 +228,7 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # 1. compute alphas, betas
         alpha_prod_t = state.common.alphas_cumprod[t]
-        alpha_prod_t_prev = state.common.alphas_cumprod[t - 1] if t > 0 else jnp.array(1.0)
+        alpha_prod_t_prev = jnp.where(t > 0, state.common.alphas_cumprod[t - 1], jnp.array(1.0))
         beta_prod_t = 1 - alpha_prod_t
         beta_prod_t_prev = 1 - alpha_prod_t_prev
 
@@ -258,11 +258,12 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         pred_prev_sample = pred_original_sample_coeff * pred_original_sample + current_sample_coeff * sample
 
         # 6. Add noise
-        variance = 0
-        if t > 0:
-            key = random.split(key, num=1)
-            noise = random.normal(key=key, shape=model_output.shape)
-            variance = (self._get_variance(state, t, predicted_variance=predicted_variance) ** 0.5) * noise
+        def random_variance():
+            split_key = jax.random.split(key, num=1)
+            noise = jax.random.normal(split_key, shape=model_output.shape)
+            return (self._get_variance(state, t, predicted_variance=predicted_variance) ** 0.5) * noise
+
+        variance = jax.lax.switch(t > 0, [random_variance, lambda: jnp.zeros(model_output.shape)])
 
         pred_prev_sample = pred_prev_sample + variance
 

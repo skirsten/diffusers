@@ -170,7 +170,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         # initial running values
 
         cur_model_output = jnp.zeros(shape)
-        counter = (0,)
+        counter = 0
         cur_sample = jnp.zeros(shape)
         ets = jnp.zeros((4,) + shape)
 

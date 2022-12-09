@@ -179,7 +179,7 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
         timesteps = timesteps.astype(int)
 
         # initial running values
-        derivatives = jnp.array([])
+        derivatives = jnp.zeros((0,) + shape)
 
         return state.replace(
             timesteps=timesteps,
@@ -228,7 +228,9 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
         # 2. Convert to an ODE derivative
         derivative = (sample - pred_original_sample) / sigma
 
-        state = state.replace(derivatives=jnp.concatenate([state.derivatives, jnp.array(derivative)])[-order:])
+        state = state.replace(
+            derivatives=jnp.concatenate([state.derivatives, derivative.reshape((1,) + derivative.shape)])[-order:]
+        )
 
         # 3. Compute linear multistep coefficients
         order = min(timestep + 1, order)
