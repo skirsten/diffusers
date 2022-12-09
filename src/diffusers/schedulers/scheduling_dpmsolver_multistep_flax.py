@@ -44,9 +44,9 @@ class DPMSolverMultistepSchedulerState:
 
     # running values
     model_outputs: Optional[jnp.ndarray] = None
-    lower_order_nums: Optional[int] = None
-    step_index: Optional[int] = None
-    prev_timestep: Optional[int] = None
+    lower_order_nums: Optional[jnp.int32] = None
+    step_index: Optional[jnp.int32] = None
+    prev_timestep: Optional[jnp.int32] = None
     cur_sample: Optional[jnp.ndarray] = None
 
     @classmethod
@@ -217,9 +217,9 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         # initial running values
 
         model_outputs = jnp.zeros((self.config.solver_order,) + shape)
-        lower_order_nums = 0
-        step_index = 0
-        prev_timestep = -1
+        lower_order_nums = jnp.int32(0)
+        step_index = jnp.int32(0)
+        prev_timestep = jnp.int32(-1)
         cur_sample = jnp.zeros(shape)
 
         return state.replace(

@@ -43,7 +43,7 @@ class PNDMSchedulerState:
 
     # running values
     cur_model_output: Optional[jnp.ndarray] = None
-    counter: Optional[int] = None
+    counter: Optional[jnp.int32] = None
     cur_sample: Optional[jnp.ndarray] = None
     ets: Optional[jnp.ndarray] = None
 
@@ -170,7 +170,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         # initial running values
 
         cur_model_output = jnp.zeros(shape)
-        counter = 0
+        counter = jnp.int32(0)
         cur_sample = jnp.zeros(shape)
         ets = jnp.zeros((4,) + shape)
 
