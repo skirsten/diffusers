@@ -461,6 +461,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         timestep: int,
         sample: jnp.ndarray,
         return_dict: bool = True,
+        unroll_branches: bool = False,
     ) -> Union[FlaxDPMSolverMultistepSchedulerOutput, Tuple]:
         """
         Predict the sample at the previous timestep by DPM-Solver. Core function to propagate the diffusion process
@@ -485,7 +486,13 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                 "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
             )
 
-        prev_timestep = jax.lax.cond(
+        cond = jax.lax.cond
+        if unroll_branches:
+
+            def cond(pred, true_fun, false_fun, *operands):
+                return jax.lax.select(pred, true_fun(*operands), false_fun(*operands))
+
+        prev_timestep = cond(
             state.step_index == len(state.timesteps) - 1,
             lambda _: 0,
             lambda _: state.timesteps[state.step_index + 1],
@@ -541,10 +548,10 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
             if self.config.solver_order == 2:
                 return step_2(state)
             elif self.config.lower_order_final and len(state.timesteps) < 15:
-                return jax.lax.cond(
+                return cond(
                     state.lower_order_nums < 2,
                     step_2,
-                    lambda state: jax.lax.cond(
+                    lambda state: cond(
                         state.step_index == len(state.timesteps) - 2,
                         step_2,
                         step_3,
@@ -553,7 +560,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                     state,
                 )
             else:
-                return jax.lax.cond(
+                return cond(
                     state.lower_order_nums < 2,
                     step_2,
                     step_3,
@@ -563,10 +570,10 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         if self.config.solver_order == 1:
             prev_sample = step_1(state)
         elif self.config.lower_order_final and len(state.timesteps) < 15:
-            prev_sample = jax.lax.cond(
+            prev_sample = cond(
                 state.lower_order_nums < 1,
                 step_1,
-                lambda state: jax.lax.cond(
+                lambda state: cond(
                     state.step_index == len(state.timesteps) - 1,
                     step_1,
                     step_23,
@@ -575,7 +582,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                 state,
             )
         else:
-            prev_sample = jax.lax.cond(
+            prev_sample = cond(
                 state.lower_order_nums < 1,
                 step_1,
                 step_23,
