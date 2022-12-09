@@ -227,9 +227,8 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # 2. Convert to an ODE derivative
         derivative = (sample - pred_original_sample) / sigma
-        state = state.replace(derivatives=jnp.append(state.derivatives, derivative))
-        if len(state.derivatives) > order:
-            state = state.replace(derivatives=jnp.delete(state.derivatives, 0))
+
+        state = state.replace(derivatives=jnp.concatenate([state.derivatives, jnp.array(derivative)])[-order:])
 
         # 3. Compute linear multistep coefficients
         order = min(timestep + 1, order)
