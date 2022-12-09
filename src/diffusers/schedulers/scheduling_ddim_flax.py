@@ -173,7 +173,7 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
         model_output: jnp.ndarray,
         timestep: int,
         sample: jnp.ndarray,
-        eta=0.0,
+        eta: float = 0.0,
         return_dict: bool = True,
     ) -> Union[FlaxDDIMSchedulerOutput, Tuple]:
         """
