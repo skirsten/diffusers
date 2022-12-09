@@ -165,7 +165,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             prk_timesteps = (prk_timesteps[:-1].repeat(2)[1:-1])[::-1]
             plms_timesteps = _timesteps[:-3][::-1]
 
-        timesteps = jnp.concatenate([state.prk_timesteps, state.plms_timesteps]).astype(jnp.int32)
+        timesteps = jnp.concatenate([prk_timesteps, plms_timesteps]).astype(jnp.int32)
 
         # initial running values
 
