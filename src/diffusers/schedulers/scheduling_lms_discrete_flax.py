@@ -234,8 +234,6 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
         )
 
         # 3. Compute linear multistep coefficients
-        # TODO: Rewrite this because we cannot loop, right?
-        # Also the sum will also not work...
 
         order = jnp.minimum(timestep + 1, order)
         lms_coeffs = [self.get_lms_coefficient(state, order, timestep, curr_order) for curr_order in range(order)]

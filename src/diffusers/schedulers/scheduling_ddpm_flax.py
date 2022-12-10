@@ -267,7 +267,6 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
             return (self._get_variance(state, t, predicted_variance=predicted_variance) ** 0.5) * noise
 
         # t > 0 must be index...
-        # TODO: Calculate random_variance on demand
         variance = jnp.where(t > 0, random_variance(), jnp.zeros(model_output.shape, dtype=self.config.dtype))
 
         pred_prev_sample = pred_prev_sample + variance
