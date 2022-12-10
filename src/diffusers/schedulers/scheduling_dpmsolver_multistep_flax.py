@@ -461,7 +461,6 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         timestep: int,
         sample: jnp.ndarray,
         return_dict: bool = True,
-        unroll_branches: bool = False,
     ) -> Union[FlaxDPMSolverMultistepSchedulerOutput, Tuple]:
         """
         Predict the sample at the previous timestep by DPM-Solver. Core function to propagate the diffusion process
@@ -486,17 +485,8 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                 "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
             )
 
-        cond = jax.lax.cond
-        if unroll_branches:
-
-            def cond(pred, true_fun, false_fun, *operands):
-                return jax.lax.select(pred, true_fun(*operands), false_fun(*operands))
-
-        prev_timestep = cond(
-            state.step_index == len(state.timesteps) - 1,
-            lambda _: 0,
-            lambda _: state.timesteps[state.step_index + 1],
-            (),
+        prev_timestep = jax.lax.select(
+            state.step_index == len(state.timesteps) - 1, 0, state.timesteps[state.step_index + 1]
         )
 
         model_output = self.convert_model_output(state, model_output, timestep, sample)
@@ -545,48 +535,50 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                     state.cur_sample,
                 )
 
+            step_2_output = step_2(state)
+            step_3_output = step_3(state)
+
             if self.config.solver_order == 2:
-                return step_2(state)
+                return step_2_output
             elif self.config.lower_order_final and len(state.timesteps) < 15:
-                return cond(
+                return jax.lax.select(
                     state.lower_order_nums < 2,
-                    step_2,
-                    lambda state: cond(
+                    step_2_output,
+                    jax.lax.select(
                         state.step_index == len(state.timesteps) - 2,
-                        step_2,
-                        step_3,
-                        state,
+                        step_2_output,
+                        step_3_output,
                     ),
-                    state,
                 )
             else:
-                return cond(
+                return jax.lax.select(
                     state.lower_order_nums < 2,
-                    step_2,
-                    step_3,
-                    state,
+                    step_2_output,
+                    step_3_output,
                 )
 
+        step_1_output = step_1(state)
+        step_23_output = step_23(state)
+
         if self.config.solver_order == 1:
-            prev_sample = step_1(state)
+            prev_sample = step_1_output
+
         elif self.config.lower_order_final and len(state.timesteps) < 15:
-            prev_sample = cond(
+            prev_sample = jax.lax.select(
                 state.lower_order_nums < 1,
-                step_1,
-                lambda state: cond(
+                step_1_output,
+                jax.lax.select(
                     state.step_index == len(state.timesteps) - 1,
-                    step_1,
-                    step_23,
-                    state,
+                    step_1_output,
+                    step_23_output,
                 ),
-                state,
             )
+
         else:
-            prev_sample = cond(
+            prev_sample = jax.lax.select(
                 state.lower_order_nums < 1,
-                step_1,
-                step_23,
-                state,
+                step_1_output,
+                step_23_output,
             )
 
         state = state.replace(

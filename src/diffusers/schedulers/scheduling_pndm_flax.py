@@ -211,7 +211,6 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         timestep: int,
         sample: jnp.ndarray,
         return_dict: bool = True,
-        unroll_branches: bool = False,
     ) -> Union[FlaxPNDMSchedulerOutput, Tuple]:
         """
         Predict the sample at the previous timestep by reversing the SDE. Core function to propagate the diffusion
@@ -238,32 +237,14 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
                 "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
             )
 
-        switch = jax.lax.switch
-        if unroll_branches:
-
-            def switch(index, branches, *operands):
-                index = jax.lax.clamp(0, index, len(branches) - 1)
-
-                values = [branch(*operands) for branch in branches]
-
-                value = values[0]
-                for i in range(1, len(values)):
-                    value = jax.lax.select(index == i, values[i], value)
-
-                return value
-
         if self.config.skip_prk_steps:
-            prev_sample, state = self.step_plms(state, model_output, timestep, sample, switch)
+            prev_sample, state = self.step_plms(state, model_output, timestep, sample)
         else:
-            prev_sample, state = switch(
-                jnp.where(state.counter < len(state.prk_timesteps), 0, 1),
-                (self.step_prk, self.step_plms),
-                # Args to either branch
-                state,
-                model_output,
-                timestep,
-                sample,
-                switch,
+            step_prk_output = self.step_prk(state, model_output, timestep, sample)
+            step_plms_output = self.step_plms(state, model_output, timestep, sample)
+
+            prev_sample, state = jax.lax.select(
+                state.counter < len(state.prk_timesteps), step_prk_output, step_plms_output
             )
 
         if not return_dict:
@@ -277,7 +258,6 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         model_output: jnp.ndarray,
         timestep: int,
         sample: jnp.ndarray,
-        switch=jax.lax.switch,
     ) -> Union[FlaxPNDMSchedulerOutput, Tuple]:
         """
         Step function propagating the sample with the Runge-Kutta method. RK takes 4 forward passes to approximate the
@@ -323,13 +303,12 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             model_output = state.cur_model_output + 1 / 6 * model_output
             return state.replace(cur_model_output=jnp.zeros_like(state.cur_model_output)), model_output
 
-        state, model_output = switch(
+        state, model_output = jax.lax.select_n(
             state.counter % 4,
-            (remainder_0, remainder_1, remainder_2, remainder_3),
-            # Args to either branch
-            state,
-            model_output,
-            state.counter // 4,
+            remainder_0(state, model_output, state.counter // 4),
+            remainder_1(state, model_output, state.counter // 4),
+            remainder_2(state, model_output, state.counter // 4),
+            remainder_3(state, model_output, state.counter // 4),
         )
 
         cur_sample = state.cur_sample
@@ -344,7 +323,6 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         model_output: jnp.ndarray,
         timestep: int,
         sample: jnp.ndarray,
-        switch=jax.lax.switch,
     ) -> Union[FlaxPNDMSchedulerOutput, Tuple]:
         """
         Step function propagating the sample with the linear multi-step method. This has one forward pass with multiple
@@ -446,10 +424,13 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             )
 
         counter = jnp.clip(state.counter, 0, 4)
-        state = switch(
+        state = jax.lax.select_n(
             counter,
-            [counter_0, counter_1, counter_2, counter_3, counter_other],
-            state,
+            counter_0(state),
+            counter_1(state),
+            counter_2(state),
+            counter_3(state),
+            counter_other(state),
         )
 
         sample = state.cur_sample
