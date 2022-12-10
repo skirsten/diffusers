@@ -378,66 +378,44 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         # else:
         #     model_output = (1 / 24) * (55 * state.ets[-1] - 59 * state.ets[-2] + 37 * state.ets[-3] - 9 * state.ets[-4])
 
-        def counter_0(state: PNDMSchedulerState):
-            ets = state.ets.at[0].set(model_output)
-            return (
-                ets,  # ets
-                sample,  # cur_sample
-                model_output,  # cur_model_output
-            )
-
-        def counter_1(state: PNDMSchedulerState):
-            return (
-                state.ets,  # ets
-                state.cur_sample,  # cur_sample
-                (model_output + state.ets[0]) / 2,  # cur_model_output
-            )
-
-        def counter_2(state: PNDMSchedulerState):
-            ets = state.ets.at[1].set(model_output)
-            return (
-                ets,  # ets
-                sample,  # cur_sample
-                (3 * ets[1] - ets[0]) / 2,  # cur_model_output
-            )
-
-        def counter_3(state: PNDMSchedulerState):
-            ets = state.ets.at[2].set(model_output)
-            return (
-                ets,  # ets
-                sample,  # cur_sample
-                (23 * ets[2] - 16 * ets[1] + 5 * ets[0]) / 12,  # cur_model_output
-            )
-
-        def counter_other(state: PNDMSchedulerState):
-            ets = state.ets.at[3].set(model_output)
-            next_model_output = (1 / 24) * (55 * ets[3] - 59 * ets[2] + 37 * ets[1] - 9 * ets[0])
-
-            ets = ets.at[0].set(ets[1])
-            ets = ets.at[1].set(ets[2])
-            ets = ets.at[2].set(ets[3])
-
-            return (
-                ets,  # ets
-                sample,  # cur_sample
-                next_model_output,  # cur_model_output
-            )
-
         counter = jnp.clip(state.counter, 0, 4)
 
-        new_ets, new_cur_sample, new_cur_model_output = jax.lax.select_n(
-            counter,
-            counter_0(state),
-            counter_1(state),
-            counter_2(state),
-            counter_3(state),
-            counter_other(state),
+        state = state.replace(
+            ets=jax.lax.select_n(
+                counter,
+                state.ets.at[0].set(model_output),  # counter 0
+                state.ets,  # counter 1
+                state.ets.at[1].set(model_output),  # counter 2
+                state.ets.at[2].set(model_output),  # counter 3
+                state.ets.at[0]
+                .set(state.ets[1])
+                .at[1]
+                .set(state.ets[2])
+                .at[2]
+                .set(state.ets[3])
+                .at[3]
+                .set(model_output),  # counter >= 4
+            ),
+            cur_sample=jax.lax.select_n(
+                counter,
+                sample,  # counter 0
+                state.cur_sample,  # counter 1
+                sample,  # counter 2
+                sample,  # counter 3
+                sample,  # counter >= 4
+            ),
         )
 
         state = state.replace(
-            ets=new_ets,
-            cur_sample=new_cur_sample,
-            cur_model_output=new_cur_model_output,
+            cur_model_output=jax.lax.select_n(
+                counter,
+                model_output,  # counter 0
+                (model_output + state.ets[0]) / 2,  # counter 1
+                (3 * state.ets[1] - state.ets[0]) / 2,  # counter 2
+                (23 * state.ets[2] - 16 * state.ets[1] + 5 * state.ets[0]) / 12,  # counter 3
+                (1 / 24)
+                * (55 * state.ets[3] - 59 * state.ets[2] + 37 * state.ets[1] - 9 * state.ets[0]),  # counter >= 4
+            ),
         )
 
         sample = state.cur_sample
