@@ -45,7 +45,6 @@ class DPMSolverMultistepSchedulerState:
     # running values
     model_outputs: Optional[jnp.ndarray] = None
     lower_order_nums: Optional[jnp.int32] = None
-    step_index: Optional[jnp.int32] = None
     prev_timestep: Optional[jnp.int32] = None
     cur_sample: Optional[jnp.ndarray] = None
 
@@ -219,7 +218,6 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         model_outputs = jnp.zeros((self.config.solver_order,) + shape, dtype=self.config.dtype)
         lower_order_nums = jnp.int32(0)
-        step_index = jnp.int32(0)
         prev_timestep = jnp.int32(-1)
         cur_sample = jnp.zeros(shape, dtype=self.config.dtype)
 
@@ -228,7 +226,6 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
             timesteps=timesteps,
             model_outputs=model_outputs,
             lower_order_nums=lower_order_nums,
-            step_index=step_index,
             prev_timestep=prev_timestep,
             cur_sample=cur_sample,
         )
@@ -485,9 +482,9 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                 "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
             )
 
-        prev_timestep = jax.lax.select(
-            state.step_index == len(state.timesteps) - 1, 0, state.timesteps[state.step_index + 1]
-        )
+        (step_index,) = jnp.where(state.timesteps == timestep, size=1)
+
+        prev_timestep = jax.lax.select(step_index == len(state.timesteps) - 1, 0, state.timesteps[step_index + 1])
 
         model_output = self.convert_model_output(state, model_output, timestep, sample)
 
@@ -503,14 +500,14 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
             return self.dpm_solver_first_order_update(
                 state,
                 state.model_outputs[-1],
-                state.timesteps[state.step_index],
+                state.timesteps[step_index],
                 state.prev_timestep,
                 state.cur_sample,
             )
 
         def step_23(state: DPMSolverMultistepSchedulerState) -> jnp.ndarray:
             def step_2(state: DPMSolverMultistepSchedulerState) -> jnp.ndarray:
-                timestep_list = jnp.array([state.timesteps[state.step_index - 1], state.timesteps[state.step_index]])
+                timestep_list = jnp.array([state.timesteps[step_index - 1], state.timesteps[step_index]])
                 return self.multistep_dpm_solver_second_order_update(
                     state,
                     state.model_outputs,
@@ -522,9 +519,9 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
             def step_3(state: DPMSolverMultistepSchedulerState) -> jnp.ndarray:
                 timestep_list = jnp.array(
                     [
-                        state.timesteps[state.step_index - 2],
-                        state.timesteps[state.step_index - 1],
-                        state.timesteps[state.step_index],
+                        state.timesteps[step_index - 2],
+                        state.timesteps[step_index - 1],
+                        state.timesteps[step_index],
                     ]
                 )
                 return self.multistep_dpm_solver_third_order_update(
@@ -545,7 +542,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                     state.lower_order_nums < 2,
                     step_2_output,
                     jax.lax.select(
-                        state.step_index == len(state.timesteps) - 2,
+                        step_index == len(state.timesteps) - 2,
                         step_2_output,
                         step_3_output,
                     ),
@@ -568,7 +565,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                 state.lower_order_nums < 1,
                 step_1_output,
                 jax.lax.select(
-                    state.step_index == len(state.timesteps) - 1,
+                    step_index == len(state.timesteps) - 1,
                     step_1_output,
                     step_23_output,
                 ),
@@ -583,7 +580,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         state = state.replace(
             lower_order_nums=jnp.minimum(state.lower_order_nums + 1, self.config.solver_order),
-            step_index=(state.step_index + 1),
+            step_index=(step_index + 1),
         )
 
         if not return_dict:
