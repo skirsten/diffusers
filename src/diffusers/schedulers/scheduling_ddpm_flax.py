@@ -156,7 +156,9 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     def _get_variance(self, state: DDPMSchedulerState, t, predicted_variance=None, variance_type=None):
         alpha_prod_t = state.common.alphas_cumprod[t]
-        alpha_prod_t_prev = state.common.alphas_cumprod[t - 1] if t > 0 else jnp.array(1.0, dtype=self.config.dtype)
+        alpha_prod_t_prev = jnp.where(
+            t > 0, state.common.alphas_cumprod[t - 1], jnp.array(1.0, dtype=self.config.dtype)
+        )
 
         # For t > 0, compute predicted variance βt (see formula (6) and (7) from https://arxiv.org/pdf/2006.11239.pdf)
         # and sample from it to get previous sample
