@@ -78,6 +78,8 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         prediction_type (`str`, default `epsilon`):
             indicates whether the model predicts the noise (epsilon), or the samples. One of `epsilon`, `sample`.
             `v-prediction` is not supported for this scheduler.
+        dtype (`jnp.dtype`, *optional*, defaults to `jnp.float32`):
+            the `dtype` used for params and computation.
     """
 
     _compatibles = _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS.copy()
