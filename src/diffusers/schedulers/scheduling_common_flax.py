@@ -53,7 +53,6 @@ class SchedulerCommonState:
     alphas: jnp.ndarray
     betas: jnp.ndarray
     alphas_cumprod: jnp.ndarray
-    final_alpha_cumprod: jnp.ndarray
 
 
 def create_common_state(config):
@@ -79,17 +78,10 @@ def create_common_state(config):
 
     alphas_cumprod = jnp.cumprod(alphas, axis=0)
 
-    # At every step in ddim, we are looking into the previous alphas_cumprod
-    # For the final step, there is no previous alphas_cumprod because we are already at 0
-    # `set_alpha_to_one` decides whether we set this parameter simply to one or
-    # whether we use the final alpha of the "non-previous" one.
-    final_alpha_cumprod = jnp.array(1.0, dtype=config.dtype) if config.set_alpha_to_one else alphas_cumprod[0]
-
     return SchedulerCommonState(
         alphas=alphas,
         betas=betas,
         alphas_cumprod=alphas_cumprod,
-        final_alpha_cumprod=final_alpha_cumprod,
     )
 
 

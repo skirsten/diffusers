@@ -33,6 +33,7 @@ from .scheduling_utils_flax import (
 @flax.struct.dataclass
 class PNDMSchedulerState:
     common: SchedulerCommonState
+    final_alpha_cumprod: jnp.ndarray
 
     # setable values
     init_noise_sigma: jnp.ndarray
@@ -48,8 +49,19 @@ class PNDMSchedulerState:
     ets: Optional[jnp.ndarray] = None
 
     @classmethod
-    def create(cls, common: SchedulerCommonState, init_noise_sigma: jnp.ndarray, timesteps: jnp.ndarray):
-        return cls(common=common, init_noise_sigma=init_noise_sigma, timesteps=timesteps)
+    def create(
+        cls,
+        common: SchedulerCommonState,
+        final_alpha_cumprod: jnp.ndarray,
+        init_noise_sigma: jnp.ndarray,
+        timesteps: jnp.ndarray,
+    ):
+        return cls(
+            common=common,
+            final_alpha_cumprod=final_alpha_cumprod,
+            init_noise_sigma=init_noise_sigma,
+            timesteps=timesteps,
+        )
 
 
 @dataclass
@@ -126,6 +138,14 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         if common is None:
             common = create_common_state(self.config)
 
+        # At every step in ddim, we are looking into the previous alphas_cumprod
+        # For the final step, there is no previous alphas_cumprod because we are already at 0
+        # `set_alpha_to_one` decides whether we set this parameter simply to one or
+        # whether we use the final alpha of the "non-previous" one.
+        final_alpha_cumprod = (
+            jnp.array(1.0, dtype=self.config.dtype) if self.config.set_alpha_to_one else common.alphas_cumprod[0]
+        )
+
         # standard deviation of the initial noise distribution
         init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
 
@@ -133,6 +153,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         return PNDMSchedulerState.create(
             common=common,
+            final_alpha_cumprod=final_alpha_cumprod,
             init_noise_sigma=init_noise_sigma,
             timesteps=timesteps,
         )
@@ -441,7 +462,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         # prev_sample -> x_(t−δ)
         alpha_prod_t = state.common.alphas_cumprod[timestep]
         alpha_prod_t_prev = jnp.where(
-            prev_timestep >= 0, state.common.alphas_cumprod[prev_timestep], state.common.final_alpha_cumprod
+            prev_timestep >= 0, state.common.alphas_cumprod[prev_timestep], state.final_alpha_cumprod
         )
         beta_prod_t = 1 - alpha_prod_t
         beta_prod_t_prev = 1 - alpha_prod_t_prev

@@ -33,6 +33,7 @@ from .scheduling_utils_flax import (
 @flax.struct.dataclass
 class DDIMSchedulerState:
     common: SchedulerCommonState
+    final_alpha_cumprod: jnp.ndarray
 
     # setable values
     init_noise_sigma: jnp.ndarray
@@ -40,8 +41,19 @@ class DDIMSchedulerState:
     num_inference_steps: Optional[int] = None
 
     @classmethod
-    def create(cls, common: SchedulerCommonState, init_noise_sigma: jnp.ndarray, timesteps: jnp.ndarray):
-        return cls(common=common, init_noise_sigma=init_noise_sigma, timesteps=timesteps)
+    def create(
+        cls,
+        common: SchedulerCommonState,
+        final_alpha_cumprod: jnp.ndarray,
+        init_noise_sigma: jnp.ndarray,
+        timesteps: jnp.ndarray,
+    ):
+        return cls(
+            common=common,
+            final_alpha_cumprod=final_alpha_cumprod,
+            init_noise_sigma=init_noise_sigma,
+            timesteps=timesteps,
+        )
 
 
 @dataclass
@@ -111,6 +123,14 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
         if common is None:
             common = create_common_state(self.config)
 
+        # At every step in ddim, we are looking into the previous alphas_cumprod
+        # For the final step, there is no previous alphas_cumprod because we are already at 0
+        # `set_alpha_to_one` decides whether we set this parameter simply to one or
+        # whether we use the final alpha of the "non-previous" one.
+        final_alpha_cumprod = (
+            jnp.array(1.0, dtype=self.config.dtype) if self.config.set_alpha_to_one else common.alphas_cumprod[0]
+        )
+
         # standard deviation of the initial noise distribution
         init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
 
@@ -118,6 +138,7 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         return DDIMSchedulerState.create(
             common=common,
+            final_alpha_cumprod=final_alpha_cumprod,
             init_noise_sigma=init_noise_sigma,
             timesteps=timesteps,
         )
@@ -214,7 +235,7 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
         prev_timestep = timestep - self.config.num_train_timesteps // state.num_inference_steps
 
         alphas_cumprod = state.common.alphas_cumprod
-        final_alpha_cumprod = state.common.final_alpha_cumprod
+        final_alpha_cumprod = state.final_alpha_cumprod
 
         # 2. compute alphas, betas
         alpha_prod_t = alphas_cumprod[timestep]
