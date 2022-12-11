@@ -178,9 +178,11 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
             timesteps=timesteps,
         )
 
-    def _get_variance(self, timestep, prev_timestep, alphas_cumprod, final_alpha_cumprod):
-        alpha_prod_t = alphas_cumprod[timestep]
-        alpha_prod_t_prev = jnp.where(prev_timestep >= 0, alphas_cumprod[prev_timestep], final_alpha_cumprod)
+    def _get_variance(self, state: DDIMSchedulerState, timestep, prev_timestep):
+        alpha_prod_t = state.common.alphas_cumprod[timestep]
+        alpha_prod_t_prev = jnp.where(
+            prev_timestep >= 0, state.common.alphas_cumprod[prev_timestep], state.final_alpha_cumprod
+        )
         beta_prod_t = 1 - alpha_prod_t
         beta_prod_t_prev = 1 - alpha_prod_t_prev
 
@@ -260,7 +262,7 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # 4. compute variance: "sigma_t(η)" -> see formula (16)
         # σ_t = sqrt((1 − α_t−1)/(1 − α_t)) * sqrt(1 − α_t/α_t−1)
-        variance = self._get_variance(timestep, prev_timestep, alphas_cumprod, final_alpha_cumprod)
+        variance = self._get_variance(state, timestep, prev_timestep)
         std_dev_t = eta * variance ** (0.5)
 
         # 5. compute "direction pointing to x_t" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
