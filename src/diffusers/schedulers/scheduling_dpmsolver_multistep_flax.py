@@ -160,7 +160,6 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         solver_type: str = "midpoint",
         lower_order_final: bool = True,
         dtype: jnp.dtype = jnp.float32,
-        **kwargs,
     ):
         pass
 

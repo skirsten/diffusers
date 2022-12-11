@@ -98,7 +98,6 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         clip_sample: bool = True,
         prediction_type: str = "epsilon",
         dtype: jnp.dtype = jnp.float32,
-        **kwargs,
     ):
         pass
 
@@ -197,7 +196,6 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         sample: jnp.ndarray,
         key: jax.random.KeyArray = jax.random.PRNGKey(0),
         return_dict: bool = True,
-        **kwargs,
     ) -> Union[FlaxDDPMSchedulerOutput, Tuple]:
         """
         Predict the sample at the previous timestep by reversing the SDE. Core function to propagate the diffusion

@@ -115,7 +115,6 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
         steps_offset: int = 0,
         prediction_type: str = "epsilon",
         dtype: jnp.dtype = jnp.float32,
-        **kwargs,
     ):
         pass
 
