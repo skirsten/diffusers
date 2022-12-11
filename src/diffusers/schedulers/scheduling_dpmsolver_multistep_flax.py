@@ -581,7 +581,6 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         state = state.replace(
             lower_order_nums=jnp.minimum(state.lower_order_nums + 1, self.config.solver_order),
-            step_index=(step_index + 1),
         )
 
         if not return_dict:
