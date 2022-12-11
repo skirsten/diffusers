@@ -483,6 +483,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
             )
 
         (step_index,) = jnp.where(state.timesteps == timestep, size=1)
+        step_index = step_index[0]
 
         prev_timestep = jax.lax.select(step_index == len(state.timesteps) - 1, 0, state.timesteps[step_index + 1])
 

@@ -127,6 +127,8 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
             `jnp.ndarray`: scaled input sample
         """
         (step_index,) = jnp.where(state.timesteps == timestep, size=1)
+        step_index = step_index[0]
+
         sigma = state.sigmas[step_index]
         sample = sample / ((sigma**2 + 1) ** 0.5)
         return sample
