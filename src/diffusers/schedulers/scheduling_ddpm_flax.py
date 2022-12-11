@@ -217,11 +217,6 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
             `tuple`. When returning a tuple, the first element is the sample tensor.
 
         """
-        if state.num_inference_steps is None:
-            raise ValueError(
-                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
-            )
-
         t = timestep
 
         if model_output.shape[1] == sample.shape[1] * 2 and self.config.variance_type in ["learned", "learned_range"]:
