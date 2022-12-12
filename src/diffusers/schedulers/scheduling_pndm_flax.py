@@ -187,7 +187,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             plms_timesteps = jnp.concatenate([_timesteps[:-1], _timesteps[-2:-1], _timesteps[-1:]])[::-1]
 
         else:
-            prk_timesteps = jnp.array(_timesteps[-self.pndm_order :]).repeat(2) + jnp.tile(
+            prk_timesteps = _timesteps[-self.pndm_order :].repeat(2) + jnp.tile(
                 jnp.array([0, self.config.num_train_timesteps // num_inference_steps // 2], dtype=jnp.int32),
                 self.pndm_order,
             )
@@ -268,22 +268,18 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         if self.config.skip_prk_steps:
             prev_sample, state = self.step_plms(state, model_output, timestep, sample)
         else:
-            step_prk_output_prev_sample, step_prk_output_state = self.step_prk(state, model_output, timestep, sample)
-            step_plms_output_prev_sample, step_plms_output_state = self.step_plms(
-                state, model_output, timestep, sample
-            )
+            prk_prev_sample, prk_state = self.step_prk(state, model_output, timestep, sample)
+            plms_prev_sample, plms_state = self.step_plms(state, model_output, timestep, sample)
 
             cond = state.counter < len(state.prk_timesteps)
 
-            prev_sample = jax.lax.select(cond, step_prk_output_prev_sample, step_plms_output_prev_sample)
+            prev_sample = jax.lax.select(cond, prk_prev_sample, plms_prev_sample)
 
             state = state.replace(
-                cur_model_output=jax.lax.select(
-                    cond, step_prk_output_state.cur_model_output, step_plms_output_state.cur_model_output
-                ),
-                ets=jax.lax.select(cond, step_prk_output_state.ets, step_plms_output_state.ets),
-                cur_sample=jax.lax.select(cond, step_prk_output_state.cur_sample, step_plms_output_state.cur_sample),
-                counter=jax.lax.select(cond, step_prk_output_state.counter, step_plms_output_state.counter),
+                cur_model_output=jax.lax.select(cond, prk_state.cur_model_output, plms_state.cur_model_output),
+                ets=jax.lax.select(cond, prk_state.ets, plms_state.ets),
+                cur_sample=jax.lax.select(cond, prk_state.cur_sample, plms_state.cur_sample),
+                counter=jax.lax.select(cond, prk_state.counter, plms_state.counter),
             )
 
         if not return_dict:
@@ -315,6 +311,11 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             `tuple`. When returning a tuple, the first element is the sample tensor.
 
         """
+
+        if state.num_inference_steps is None:
+            raise ValueError(
+                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
+            )
 
         diff_to_prev = jnp.where(
             state.counter % 2, 0, self.config.num_train_timesteps // state.num_inference_steps // 2
@@ -378,6 +379,11 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             `tuple`. When returning a tuple, the first element is the sample tensor.
 
         """
+
+        if state.num_inference_steps is None:
+            raise ValueError(
+                "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
+            )
 
         if not self.config.skip_prk_steps and len(state.ets) < 3:
             raise ValueError(
