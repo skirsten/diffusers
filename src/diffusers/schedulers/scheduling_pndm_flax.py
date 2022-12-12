@@ -322,6 +322,12 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         prev_timestep = timestep - diff_to_prev
         timestep = state.prk_timesteps[state.counter // 4 * 4]
 
+        model_output = jax.lax.select(
+            (state.counter % 4) != 3,
+            model_output,  # remainder 0, 1, 2
+            state.cur_model_output + 1 / 6 * model_output,  # remainder 3
+        )
+
         state = state.replace(
             cur_model_output=jax.lax.select_n(
                 state.counter % 4,
@@ -340,12 +346,6 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
                 sample,  # remainder 0
                 state.cur_sample,  # remainder 1, 2, 3
             ),
-        )
-
-        model_output = jax.lax.select(
-            (state.counter % 4) != 3,
-            model_output,  # remainder 0, 1, 2
-            state.cur_model_output + 1 / 6 * model_output,  # remainder 3
         )
 
         cur_sample = state.cur_sample
@@ -425,14 +425,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
                 state.ets.at[1].set(model_output),  # counter 2
                 state.ets.at[2].set(model_output),  # counter 3
                 state.ets.at[3].set(model_output),  # counter 4
-                state.ets.at[0]
-                .set(state.ets[1])
-                .at[1]
-                .set(state.ets[2])
-                .at[2]
-                .set(state.ets[3])
-                .at[3]
-                .set(model_output),  # counter >= 5
+                state.ets.at[0:3].set(state.ets[1:4]).at[3].set(model_output),  # counter >= 5
             ),
             cur_sample=jax.lax.select(
                 state.counter == 1,
