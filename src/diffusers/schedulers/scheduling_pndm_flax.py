@@ -268,11 +268,22 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         if self.config.skip_prk_steps:
             prev_sample, state = self.step_plms(state, model_output, timestep, sample)
         else:
-            step_prk_output = self.step_prk(state, model_output, timestep, sample)
-            step_plms_output = self.step_plms(state, model_output, timestep, sample)
+            step_prk_output_prev_sample, step_prk_output_state = self.step_prk(state, model_output, timestep, sample)
+            step_plms_output_prev_sample, step_plms_output_state = self.step_plms(
+                state, model_output, timestep, sample
+            )
 
-            prev_sample, state = jax.lax.select(
-                state.counter < len(state.prk_timesteps), step_prk_output, step_plms_output
+            cond = state.counter < len(state.prk_timesteps)
+
+            prev_sample = jax.lax.select(cond, step_prk_output_prev_sample, step_plms_output_prev_sample)
+
+            state = state.replace(
+                cur_model_output=jax.lax.select(
+                    cond, step_prk_output_state.cur_model_output, step_plms_output_state.cur_model_output
+                ),
+                ets=jax.lax.select(cond, step_prk_output_state.ets, step_plms_output_state.ets),
+                cur_sample=jax.lax.select(cond, step_prk_output_state.cur_sample, step_plms_output_state.cur_sample),
+                counter=jax.lax.select(cond, step_prk_output_state.counter, step_plms_output_state.counter),
             )
 
         if not return_dict:
