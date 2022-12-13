@@ -342,7 +342,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             ),
             ets=jax.lax.select(
                 (state.counter % 4) == 0,
-                state.ets.at[state.counter // 4].set(model_output),  # remainder 0
+                state.ets.at[0:3].set(state.ets[1:4]).at[3].set(model_output),  # remainder 0
                 state.ets,  # remainder 1, 2, 3
             ),
             cur_sample=jax.lax.select(
@@ -388,7 +388,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
                 "Number of inference steps is 'None', you need to run 'set_timesteps' after creating the scheduler"
             )
 
-        if not self.config.skip_prk_steps and len(state.ets) < 3:
+        if not self.config.skip_prk_steps:
             raise ValueError(
                 f"{self.__class__} can only be run AFTER scheduler has been run "
                 "in 'prk' mode for at least 12 iterations "
@@ -427,19 +427,15 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         #     model_output = (1 / 24) * (55 * state.ets[-1] - 59 * state.ets[-2] + 37 * state.ets[-3] - 9 * state.ets[-4])
 
         state = state.replace(
-            ets=jax.lax.select_n(
-                jnp.clip(state.counter, 0, 5),
-                state.ets.at[0].set(model_output),  # counter 0
+            ets=jax.lax.select(
+                state.counter != 1,
+                state.ets.at[0:3].set(state.ets[1:4]).at[3].set(model_output),  # counter != 1
                 state.ets,  # counter 1
-                state.ets.at[1].set(model_output),  # counter 2
-                state.ets.at[2].set(model_output),  # counter 3
-                state.ets.at[3].set(model_output),  # counter 4
-                state.ets.at[0:3].set(state.ets[1:4]).at[3].set(model_output),  # counter >= 5
             ),
             cur_sample=jax.lax.select(
-                state.counter == 1,
-                state.cur_sample,  # counter 1
+                state.counter != 1,
                 sample,  # counter != 1
+                state.cur_sample,  # counter 1
             ),
         )
 
@@ -447,11 +443,11 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
             cur_model_output=jax.lax.select_n(
                 jnp.clip(state.counter, 0, 4),
                 model_output,  # counter 0
-                (model_output + state.ets[0]) / 2,  # counter 1
-                (3 * state.ets[1] - state.ets[0]) / 2,  # counter 2
-                (23 * state.ets[2] - 16 * state.ets[1] + 5 * state.ets[0]) / 12,  # counter 3
+                (model_output + state.ets[-1]) / 2,  # counter 1
+                (3 * state.ets[-1] - state.ets[-2]) / 2,  # counter 2
+                (23 * state.ets[-1] - 16 * state.ets[-2] + 5 * state.ets[-3]) / 12,  # counter 3
                 (1 / 24)
-                * (55 * state.ets[3] - 59 * state.ets[2] + 37 * state.ets[1] - 9 * state.ets[0]),  # counter >= 4
+                * (55 * state.ets[-1] - 59 * state.ets[-2] + 37 * state.ets[-3] - 9 * state.ets[-4]),  # counter >= 4
             ),
         )
 
