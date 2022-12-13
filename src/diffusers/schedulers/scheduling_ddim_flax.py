@@ -101,6 +101,8 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     _compatibles = _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS.copy()
 
+    dtype: jnp.dtype
+
     @property
     def has_state(self):
         return True
@@ -118,22 +120,22 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
         prediction_type: str = "epsilon",
         dtype: jnp.dtype = jnp.float32,
     ):
-        pass
+        self.dtype = dtype
 
     def create_state(self, common: Optional[SchedulerCommonState] = None) -> DDIMSchedulerState:
         if common is None:
-            common = create_common_state(self.config)
+            common = create_common_state(self)
 
         # At every step in ddim, we are looking into the previous alphas_cumprod
         # For the final step, there is no previous alphas_cumprod because we are already at 0
         # `set_alpha_to_one` decides whether we set this parameter simply to one or
         # whether we use the final alpha of the "non-previous" one.
         final_alpha_cumprod = (
-            jnp.array(1.0, dtype=self.config.dtype) if self.config.set_alpha_to_one else common.alphas_cumprod[0]
+            jnp.array(1.0, dtype=self.dtype) if self.config.set_alpha_to_one else common.alphas_cumprod[0]
         )
 
         # standard deviation of the initial noise distribution
-        init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
+        init_noise_sigma = jnp.array(1.0, dtype=self.dtype)
 
         timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
 

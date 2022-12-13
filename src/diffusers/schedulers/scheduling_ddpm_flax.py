@@ -84,6 +84,8 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     _compatibles = _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS.copy()
 
+    dtype: jnp.dtype
+
     @property
     def has_state(self):
         return True
@@ -101,14 +103,14 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         prediction_type: str = "epsilon",
         dtype: jnp.dtype = jnp.float32,
     ):
-        pass
+        self.dtype = dtype
 
     def create_state(self, common: Optional[SchedulerCommonState] = None) -> DDPMSchedulerState:
         if common is None:
-            common = create_common_state(self.config)
+            common = create_common_state(self)
 
         # standard deviation of the initial noise distribution
-        init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
+        init_noise_sigma = jnp.array(1.0, dtype=self.dtype)
 
         timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
 
@@ -157,9 +159,7 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     def _get_variance(self, state: DDPMSchedulerState, t, predicted_variance=None, variance_type=None):
         alpha_prod_t = state.common.alphas_cumprod[t]
-        alpha_prod_t_prev = jnp.where(
-            t > 0, state.common.alphas_cumprod[t - 1], jnp.array(1.0, dtype=self.config.dtype)
-        )
+        alpha_prod_t_prev = jnp.where(t > 0, state.common.alphas_cumprod[t - 1], jnp.array(1.0, dtype=self.dtype))
 
         # For t > 0, compute predicted variance βt (see formula (6) and (7) from https://arxiv.org/pdf/2006.11239.pdf)
         # and sample from it to get previous sample
@@ -226,9 +226,7 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # 1. compute alphas, betas
         alpha_prod_t = state.common.alphas_cumprod[t]
-        alpha_prod_t_prev = jnp.where(
-            t > 0, state.common.alphas_cumprod[t - 1], jnp.array(1.0, dtype=self.config.dtype)
-        )
+        alpha_prod_t_prev = jnp.where(t > 0, state.common.alphas_cumprod[t - 1], jnp.array(1.0, dtype=self.dtype))
         beta_prod_t = 1 - alpha_prod_t
         beta_prod_t_prev = 1 - alpha_prod_t_prev
 
@@ -262,10 +260,10 @@ class FlaxDDPMScheduler(FlaxSchedulerMixin, ConfigMixin):
         # 6. Add noise
         def random_variance():
             split_key = jax.random.split(key, num=1)
-            noise = jax.random.normal(split_key, shape=model_output.shape, dtype=self.config.dtype)
+            noise = jax.random.normal(split_key, shape=model_output.shape, dtype=self.dtype)
             return (self._get_variance(state, t, predicted_variance=predicted_variance) ** 0.5) * noise
 
-        variance = jnp.where(t > 0, random_variance(), jnp.zeros(model_output.shape, dtype=self.config.dtype))
+        variance = jnp.where(t > 0, random_variance(), jnp.zeros(model_output.shape, dtype=self.dtype))
 
         pred_prev_sample = pred_prev_sample + variance
 

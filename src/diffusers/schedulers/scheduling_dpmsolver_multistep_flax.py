@@ -140,6 +140,8 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     _compatibles = _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS.copy()
 
+    dtype: jnp.dtype
+
     @property
     def has_state(self):
         return True
@@ -162,11 +164,11 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         lower_order_final: bool = True,
         dtype: jnp.dtype = jnp.float32,
     ):
-        pass
+        self.dtype = dtype
 
     def create_state(self, common: Optional[SchedulerCommonState] = None) -> DPMSolverMultistepSchedulerState:
         if common is None:
-            common = create_common_state(self.config)
+            common = create_common_state(self)
 
         # Currently we only support VP-type noise schedule
         alpha_t = jnp.sqrt(common.alphas_cumprod)
@@ -180,7 +182,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
             raise NotImplementedError(f"{self.config.solver_type} does is not implemented for {self.__class__}")
 
         # standard deviation of the initial noise distribution
-        init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
+        init_noise_sigma = jnp.array(1.0, dtype=self.dtype)
 
         timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
 
@@ -216,10 +218,10 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # initial running values
 
-        model_outputs = jnp.zeros((self.config.solver_order,) + shape, dtype=self.config.dtype)
+        model_outputs = jnp.zeros((self.config.solver_order,) + shape, dtype=self.dtype)
         lower_order_nums = jnp.int32(0)
         prev_timestep = jnp.int32(-1)
-        cur_sample = jnp.zeros(shape, dtype=self.config.dtype)
+        cur_sample = jnp.zeros(shape, dtype=self.dtype)
 
         return state.replace(
             num_inference_steps=num_inference_steps,

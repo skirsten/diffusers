@@ -84,6 +84,8 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     _compatibles = _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS.copy()
 
+    dtype: jnp.dtype
+
     @property
     def has_state(self):
         return True
@@ -99,11 +101,11 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
         prediction_type: str = "epsilon",
         dtype: jnp.dtype = jnp.float32,
     ):
-        pass
+        self.dtype = dtype
 
     def create_state(self, common: Optional[SchedulerCommonState] = None) -> LMSDiscreteSchedulerState:
         if common is None:
-            common = create_common_state(self.config)
+            common = create_common_state(self)
 
         timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
         sigmas = ((1 - common.alphas_cumprod) / common.alphas_cumprod) ** 0.5
@@ -175,7 +177,7 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
                 the number of diffusion steps used when generating samples with a pre-trained model.
         """
 
-        timesteps = jnp.linspace(self.config.num_train_timesteps - 1, 0, num_inference_steps, dtype=self.config.dtype)
+        timesteps = jnp.linspace(self.config.num_train_timesteps - 1, 0, num_inference_steps, dtype=self.dtype)
 
         low_idx = jnp.floor(timesteps).astype(jnp.int32)
         high_idx = jnp.ceil(timesteps).astype(jnp.int32)
@@ -184,12 +186,12 @@ class FlaxLMSDiscreteScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         sigmas = ((1 - state.common.alphas_cumprod) / state.common.alphas_cumprod) ** 0.5
         sigmas = (1 - frac) * sigmas[low_idx] + frac * sigmas[high_idx]
-        sigmas = jnp.concatenate([sigmas, jnp.array([0.0], dtype=self.config.dtype)])
+        sigmas = jnp.concatenate([sigmas, jnp.array([0.0], dtype=self.dtype)])
 
         timesteps = timesteps.astype(jnp.int32)
 
         # initial running values
-        derivatives = jnp.zeros((0,) + shape, dtype=self.config.dtype)
+        derivatives = jnp.zeros((0,) + shape, dtype=self.dtype)
 
         return state.replace(
             timesteps=timesteps,

@@ -55,24 +55,28 @@ class SchedulerCommonState:
     alphas_cumprod: jnp.ndarray
 
 
-def create_common_state(config):
+def create_common_state(scheduler):
+    config = scheduler.config
+
     if config.trained_betas is not None:
-        betas = jnp.asarray(config.trained_betas, dtype=config.dtype)
+        betas = jnp.asarray(config.trained_betas, dtype=scheduler.dtype)
     elif config.beta_schedule == "linear":
-        betas = jnp.linspace(config.beta_start, config.beta_end, config.num_train_timesteps, dtype=config.dtype)
+        betas = jnp.linspace(config.beta_start, config.beta_end, config.num_train_timesteps, dtype=scheduler.dtype)
     elif config.beta_schedule == "scaled_linear":
         # this schedule is very specific to the latent diffusion model.
         betas = (
             jnp.linspace(
-                config.beta_start**0.5, config.beta_end**0.5, config.num_train_timesteps, dtype=config.dtype
+                config.beta_start**0.5, config.beta_end**0.5, config.num_train_timesteps, dtype=scheduler.dtype
             )
             ** 2
         )
     elif config.beta_schedule == "squaredcos_cap_v2":
         # Glide cosine schedule
-        betas = betas_for_alpha_bar(config.num_train_timesteps, dtype=config.dtype)
+        betas = betas_for_alpha_bar(config.num_train_timesteps, dtype=scheduler.dtype)
     else:
-        raise NotImplementedError(f"beta_schedule {config.beta_schedule} is not implemented for scheduler")
+        raise NotImplementedError(
+            f"beta_schedule {config.beta_schedule} is not implemented for scheduler {scheduler.__class__.__name__}"
+        )
 
     alphas = 1.0 - betas
 

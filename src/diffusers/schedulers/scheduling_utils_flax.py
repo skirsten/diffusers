@@ -50,7 +50,7 @@ class FlaxSchedulerMixin:
     """
 
     config_name = SCHEDULER_CONFIG_NAME
-    _flax_internal_args = ["dtype"]
+    ignore_for_config = ["dtype"]
     _compatibles = []
     has_compatibles = True
 

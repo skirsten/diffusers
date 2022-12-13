@@ -111,6 +111,7 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     _compatibles = _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS.copy()
 
+    dtype: jnp.dtype
     pndm_order: int
 
     @property
@@ -131,6 +132,8 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
         prediction_type: str = "epsilon",
         dtype: jnp.dtype = jnp.float32,
     ):
+        self.dtype = dtype
+
         # For now we only support F-PNDM, i.e. the runge-kutta method
         # For more information on the algorithm please take a look at the paper: https://arxiv.org/pdf/2202.09778.pdf
         # mainly at formula (9), (12), (13) and the Algorithm 2.
@@ -138,18 +141,18 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
     def create_state(self, common: Optional[SchedulerCommonState] = None) -> PNDMSchedulerState:
         if common is None:
-            common = create_common_state(self.config)
+            common = create_common_state(self)
 
         # At every step in ddim, we are looking into the previous alphas_cumprod
         # For the final step, there is no previous alphas_cumprod because we are already at 0
         # `set_alpha_to_one` decides whether we set this parameter simply to one or
         # whether we use the final alpha of the "non-previous" one.
         final_alpha_cumprod = (
-            jnp.array(1.0, dtype=self.config.dtype) if self.config.set_alpha_to_one else common.alphas_cumprod[0]
+            jnp.array(1.0, dtype=self.dtype) if self.config.set_alpha_to_one else common.alphas_cumprod[0]
         )
 
         # standard deviation of the initial noise distribution
-        init_noise_sigma = jnp.array(1.0, dtype=self.config.dtype)
+        init_noise_sigma = jnp.array(1.0, dtype=self.dtype)
 
         timesteps = jnp.arange(0, self.config.num_train_timesteps).round()[::-1]
 
@@ -199,10 +202,10 @@ class FlaxPNDMScheduler(FlaxSchedulerMixin, ConfigMixin):
 
         # initial running values
 
-        cur_model_output = jnp.zeros(shape, dtype=self.config.dtype)
+        cur_model_output = jnp.zeros(shape, dtype=self.dtype)
         counter = jnp.int32(0)
-        cur_sample = jnp.zeros(shape, dtype=self.config.dtype)
-        ets = jnp.zeros((4,) + shape, dtype=self.config.dtype)
+        cur_sample = jnp.zeros(shape, dtype=self.dtype)
+        ets = jnp.zeros((4,) + shape, dtype=self.dtype)
 
         return state.replace(
             timesteps=timesteps,
