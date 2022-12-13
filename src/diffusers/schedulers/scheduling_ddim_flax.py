@@ -22,6 +22,7 @@ import flax
 import jax.numpy as jnp
 
 from ..configuration_utils import ConfigMixin, register_to_config
+from ..utils import deprecate
 from .scheduling_common_flax import SchedulerCommonState, add_noise_common, create_common_state
 from .scheduling_utils_flax import (
     _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS,
@@ -100,6 +101,7 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
     """
 
     _compatibles = _FLAX_COMPATIBLE_STABLE_DIFFUSION_SCHEDULERS.copy()
+    _deprecated_kwargs = ["predict_epsilon"]
 
     dtype: jnp.dtype
 
@@ -119,7 +121,16 @@ class FlaxDDIMScheduler(FlaxSchedulerMixin, ConfigMixin):
         steps_offset: int = 0,
         prediction_type: str = "epsilon",
         dtype: jnp.dtype = jnp.float32,
+        **kwargs,
     ):
+        message = (
+            "Please make sure to instantiate your scheduler with `prediction_type` instead. E.g. `scheduler ="
+            f" {self.__class__.__name__}.from_pretrained(<model_id>, prediction_type='epsilon')`."
+        )
+        predict_epsilon = deprecate("predict_epsilon", "0.12.0", message, take_from=kwargs)
+        if predict_epsilon is not None:
+            self.register_to_config(prediction_type="epsilon" if predict_epsilon else "sample")
+
         self.dtype = dtype
 
     def create_state(self, common: Optional[SchedulerCommonState] = None) -> DDIMSchedulerState:
