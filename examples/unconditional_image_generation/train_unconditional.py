@@ -332,7 +332,7 @@ def main(args):
 
     dataset.set_transform(transforms)
     train_dataloader = torch.utils.data.DataLoader(
-        dataset, batch_size=args.train_batch_size, shuffle=True, num_workers=args.dataloader_num_workers
+        dataset, batch_size=args.train_batch_size, shuffle=True, num_workers=args.dataloader_num_workers, num_workers=1
     )
 
     lr_scheduler = get_scheduler(

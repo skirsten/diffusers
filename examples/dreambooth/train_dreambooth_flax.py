@@ -450,7 +450,12 @@ def main():
         )
 
     train_dataloader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=total_train_batch_size, shuffle=True, collate_fn=collate_fn, drop_last=True
+        train_dataset,
+        batch_size=total_train_batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+        drop_last=True,
+        num_workers=1,
     )
 
     weight_dtype = jnp.float32

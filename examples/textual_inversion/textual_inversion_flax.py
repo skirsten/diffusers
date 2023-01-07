@@ -451,7 +451,12 @@ def main():
 
     total_train_batch_size = args.train_batch_size * jax.local_device_count()
     train_dataloader = torch.utils.data.DataLoader(
-        train_dataset, batch_size=total_train_batch_size, shuffle=True, drop_last=True, collate_fn=collate_fn
+        train_dataset,
+        batch_size=total_train_batch_size,
+        shuffle=True,
+        drop_last=True,
+        collate_fn=collate_fn,
+        num_workers=1,
     )
 
     # Optimization
