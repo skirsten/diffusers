@@ -56,8 +56,11 @@ class ControlNetConditioningEmbedding(nn.Module):
         conditioning_embedding_channels: int,
         conditioning_channels: int = 3,
         block_out_channels: Tuple[int] = (16, 32, 96, 256),
+        channel_order: str = "rgb",
     ):
         super().__init__()
+
+        self.channel_order = channel_order
 
         self.conv_in = nn.Conv2d(conditioning_channels, block_out_channels[0], kernel_size=3, padding=1)
 
@@ -74,6 +77,17 @@ class ControlNetConditioningEmbedding(nn.Module):
         )
 
     def forward(self, conditioning):
+        # check channel order
+        channel_order = self.channel_order
+
+        if channel_order == "rgb":
+            # in rgb order by default
+            ...
+        elif channel_order == "bgr":
+            conditioning = torch.flip(conditioning, dims=[1])
+        else:
+            raise ValueError(f"unknown `channel_order`: {channel_order}")
+
         embedding = self.conv_in(conditioning)
         embedding = F.silu(embedding)
 
@@ -184,6 +198,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         self.controlnet_cond_embedding = ControlNetConditioningEmbedding(
             conditioning_embedding_channels=block_out_channels[0],
             block_out_channels=conditioning_embedding_out_channels,
+            channel_order=controlnet_conditioning_channel_order,
         )
 
         self.down_blocks = nn.ModuleList([])
@@ -450,7 +465,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         sample: torch.FloatTensor,
         timestep: Union[torch.Tensor, float, int],
         encoder_hidden_states: torch.Tensor,
-        controlnet_cond: torch.FloatTensor,
+        controlnet_cond_embeds: torch.Tensor,
         conditioning_scale: float = 1.0,
         class_labels: Optional[torch.Tensor] = None,
         timestep_cond: Optional[torch.Tensor] = None,
@@ -458,17 +473,6 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = True,
     ) -> Union[ControlNetOutput, Tuple]:
-        # check channel order
-        channel_order = self.config.controlnet_conditioning_channel_order
-
-        if channel_order == "rgb":
-            # in rgb order by default
-            ...
-        elif channel_order == "bgr":
-            controlnet_cond = torch.flip(controlnet_cond, dims=[1])
-        else:
-            raise ValueError(f"unknown `controlnet_conditioning_channel_order`: {channel_order}")
-
         # prepare attention_mask
         if attention_mask is not None:
             attention_mask = (1 - attention_mask.to(sample.dtype)) * -10000.0
@@ -513,9 +517,7 @@ class ControlNetModel(ModelMixin, ConfigMixin):
         # 2. pre-process
         sample = self.conv_in(sample)
 
-        controlnet_cond = self.controlnet_cond_embedding(controlnet_cond)
-
-        sample += controlnet_cond
+        sample += controlnet_cond_embeds
 
         # 3. down
         down_block_res_samples = (sample,)

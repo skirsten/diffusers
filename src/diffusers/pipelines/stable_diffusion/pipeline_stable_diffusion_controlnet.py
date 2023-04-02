@@ -925,7 +925,10 @@ class StableDiffusionControlNetPipeline(DiffusionPipeline, TextualInversionLoade
         # 7. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
-        # 8. Denoising loop
+        # 8. Prepare controlnet cond embeddings
+        controlnet_cond_embeds = self.controlnet.controlnet_cond_embedding(image)
+
+        # 9. Denoising loop
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -938,7 +941,7 @@ class StableDiffusionControlNetPipeline(DiffusionPipeline, TextualInversionLoade
                     latent_model_input,
                     t,
                     encoder_hidden_states=prompt_embeds,
-                    controlnet_cond=image,
+                    controlnet_cond_embeds=controlnet_cond_embeds,
                     conditioning_scale=controlnet_conditioning_scale,
                     return_dict=False,
                 )
